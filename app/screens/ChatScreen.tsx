@@ -1,27 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { View, SafeAreaView, KeyboardAvoidingView, Platform, TextInput, TouchableOpacity, Text } from 'react-native';
-import ChatThread, { ChatMessage } from '../components/ChatThread';
+import ChatThread from '../components/ChatThread';
+import { useStore, ChatMessage } from '../services/storage/StateManager';
 
 export default function ChatScreen() {
-  // Dummy data for testing Task 17 (aka Task 16 in tasks.md)
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: '1',
-      content: 'Hello! This is a test message.',
-      senderId: 'other',
-      timestamp: new Date(Date.now() - 60000),
-      isMe: false,
-    },
-    {
-      id: '2',
-      content: 'Hi there! Looks like the ChatThread component is working.',
-      senderId: 'me',
-      timestamp: new Date(),
-      isMe: true,
-    },
-  ]);
-
+  const { messages, addMessage, setMessages } = useStore();
   const [inputText, setInputText] = useState('');
+
+  // Initial dummy load if empty (just for testing purposes)
+  useEffect(() => {
+    if (messages.length === 0) {
+      setMessages([
+        {
+          id: '1',
+          content: 'Hello! This is a test message from StateManager.',
+          senderId: 'other',
+          timestamp: new Date(Date.now() - 60000),
+          isMe: false,
+        },
+      ]);
+    }
+  }, []);
 
   const handleSend = () => {
     if (!inputText.trim()) return;
@@ -34,7 +33,7 @@ export default function ChatScreen() {
       isMe: true,
     };
 
-    setMessages([...messages, newMessage]);
+    addMessage(newMessage);
     setInputText('');
   };
 

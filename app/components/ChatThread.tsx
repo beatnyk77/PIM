@@ -1,14 +1,6 @@
 import React from 'react';
 import { View, Text, FlatList, ListRenderItem } from 'react-native';
-
-// Temporary type for testing
-export interface ChatMessage {
-  id: string;
-  content: string;
-  senderId: string;
-  timestamp: Date;
-  isMe: boolean;
-}
+import { ChatMessage } from '../services/storage/StateManager';
 
 interface ChatThreadProps {
   messages: ChatMessage[];
