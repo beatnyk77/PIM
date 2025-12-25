@@ -75,6 +75,7 @@ export default function HomeScreen() {
       
       <View className="mt-4 space-y-2">
         <Button title="View Profile" onPress={() => navigation.navigate('Profile')} />
+        <Button title="Open Chat (Test)" onPress={() => navigation.navigate('Chat')} />
         <Button title="Reset Identity" onPress={resetIdentity} color="red" />
       </View>
     </View>
