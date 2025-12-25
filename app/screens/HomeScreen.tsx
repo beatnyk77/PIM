@@ -1,4 +1,4 @@
-import { View, Text } from 'react-native';
+import { View, Text, Button } from 'react-native';
 import { useStore } from '../services/storage/StateManager';
 import { useEffect, useState } from 'react';
 import { testDbConnection } from '../services/storage/LocalDb';
@@ -7,11 +7,10 @@ import { IdentityService } from '../services/auth/IdentityService';
 export default function HomeScreen() {
   const { activeChat, setActiveChat } = useStore();
   const [dbStatus, setDbStatus] = useState<string>('Connecting...');
-  const [identityStatus, setIdentityStatus] = useState<string>('Pending...');
+  const [identityStatus, setIdentityStatus] = useState<string>('Checking...');
 
   useEffect(() => {
     console.log('Current Active Chat:', activeChat);
-    // Test update
     setActiveChat('test-chat-id');
 
     // Test DB
@@ -19,22 +18,29 @@ export default function HomeScreen() {
       setDbStatus(success ? 'Connected' : 'Failed');
     });
 
-    // Test Identity Generation
-    IdentityService.generateIdentity().then(keys => {
-      if (keys) {
-        setIdentityStatus(`Generated (ID: ${keys.registrationId})`);
-        console.log('Keys generated:', keys);
-      } else {
-        setIdentityStatus('Failed');
-      }
-    });
+    checkIdentity();
   }, []);
 
-  useEffect(() => {
-    if (activeChat === 'test-chat-id') {
-      console.log('State updated successfully:', activeChat);
+  const checkIdentity = async () => {
+    const existingKeys = await IdentityService.loadKeys();
+    if (existingKeys) {
+      setIdentityStatus(`Loaded (ID: ${existingKeys.registrationId})`);
+    } else {
+      setIdentityStatus('No keys found. Generating...');
+      const newKeys = await IdentityService.generateIdentity();
+      if (newKeys) {
+        setIdentityStatus(`Generated (ID: ${newKeys.registrationId})`);
+      } else {
+        setIdentityStatus('Failed to generate');
+      }
     }
-  }, [activeChat]);
+  };
+
+  const resetIdentity = async () => {
+    await IdentityService.clearKeys();
+    setIdentityStatus('Keys Cleared');
+    setTimeout(checkIdentity, 1000);
+  };
 
   return (
     <View className="flex-1 bg-background items-center justify-center">
@@ -43,6 +49,10 @@ export default function HomeScreen() {
       <Text className="text-secondary mt-2">Active Chat: {activeChat}</Text>
       <Text className="text-accent mt-2">DB Status: {dbStatus}</Text>
       <Text className="text-accent mt-2">Identity: {identityStatus}</Text>
+      
+      <View className="mt-4">
+        <Button title="Reset Identity" onPress={resetIdentity} />
+      </View>
     </View>
   );
 }
