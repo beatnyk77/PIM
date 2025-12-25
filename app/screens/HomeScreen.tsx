@@ -1,10 +1,12 @@
 import { View, Text, Button } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useStore } from '../services/storage/StateManager';
 import { useEffect, useState } from 'react';
 import { testDbConnection } from '../services/storage/LocalDb';
 import { IdentityService } from '../services/auth/IdentityService';
 
 export default function HomeScreen() {
+  const navigation = useNavigation<any>();
   const { activeChat, setActiveChat } = useStore();
   const [dbStatus, setDbStatus] = useState<string>('Connecting...');
   const [identityStatus, setIdentityStatus] = useState<string>('Checking...');
@@ -50,8 +52,9 @@ export default function HomeScreen() {
       <Text className="text-accent mt-2">DB Status: {dbStatus}</Text>
       <Text className="text-accent mt-2">Identity: {identityStatus}</Text>
       
-      <View className="mt-4">
-        <Button title="Reset Identity" onPress={resetIdentity} />
+      <View className="mt-4 space-y-2">
+        <Button title="View Profile" onPress={() => navigation.navigate('Profile')} />
+        <Button title="Reset Identity" onPress={resetIdentity} color="red" />
       </View>
     </View>
   );
