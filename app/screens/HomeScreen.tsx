@@ -4,12 +4,14 @@ import { useStore } from '../services/storage/StateManager';
 import { useEffect, useState } from 'react';
 import { testDbConnection } from '../services/storage/LocalDb';
 import { IdentityService } from '../services/auth/IdentityService';
+import { MessageRelay, relayEvents } from '../services/messaging/MessageRelay';
 
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
   const { activeChat, setActiveChat } = useStore();
   const [dbStatus, setDbStatus] = useState<string>('Connecting...');
   const [identityStatus, setIdentityStatus] = useState<string>('Checking...');
+  const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected');
 
   useEffect(() => {
     console.log('Current Active Chat:', activeChat);
@@ -21,6 +23,24 @@ export default function HomeScreen() {
     });
 
     checkIdentity();
+
+    // Test MessageRelay
+    const setupRelay = async () => {
+       const keys = await IdentityService.loadKeys();
+       if (keys) {
+         MessageRelay.connect(keys.registrationId.toString());
+       }
+    };
+    setupRelay();
+
+    // Listen for relay events
+    relayEvents.on('connected', () => setConnectionStatus('Connected'));
+    relayEvents.on('disconnected', () => setConnectionStatus('Disconnected'));
+
+    return () => {
+      relayEvents.off('connected');
+      relayEvents.off('disconnected');
+    }
   }, []);
 
   const checkIdentity = async () => {
@@ -51,6 +71,7 @@ export default function HomeScreen() {
       <Text className="text-secondary mt-2">Active Chat: {activeChat}</Text>
       <Text className="text-accent mt-2">DB Status: {dbStatus}</Text>
       <Text className="text-accent mt-2">Identity: {identityStatus}</Text>
+      <Text className="text-accent mt-2">Relay: {connectionStatus}</Text>
       
       <View className="mt-4 space-y-2">
         <Button title="View Profile" onPress={() => navigation.navigate('Profile')} />
