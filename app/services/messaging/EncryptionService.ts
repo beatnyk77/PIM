@@ -7,6 +7,7 @@ import { IdentityService } from '../auth/IdentityService';
 class InMemorySignalProtocolStore implements Signal.StorageType {
   private identityKeyPair: Signal.KeyPairType | undefined;
   private localRegistrationId: number | undefined;
+  private sessions: Map<string, string> = new Map();
 
   constructor(identityKeyPair?: Signal.KeyPairType, registrationId?: number) {
     this.identityKeyPair = identityKeyPair;
@@ -35,8 +36,12 @@ class InMemorySignalProtocolStore implements Signal.StorageType {
   async loadSignedPreKey(keyId: string | number): Promise<Signal.KeyPairType | undefined> { return undefined; }
   async storeSignedPreKey(keyId: string | number, keyPair: Signal.KeyPairType): Promise<void> {}
   async removeSignedPreKey(keyId: string | number): Promise<void> {}
-  async loadSession(identifier: string): Promise<string | undefined> { return undefined; }
-  async storeSession(identifier: string, record: string): Promise<void> {}
+  async loadSession(identifier: string): Promise<string | undefined> { 
+    return this.sessions.get(identifier); 
+  }
+  async storeSession(identifier: string, record: string): Promise<void> {
+    this.sessions.set(identifier, record);
+  }
 }
 
 class EncryptionServiceClass {
@@ -64,6 +69,27 @@ class EncryptionServiceClass {
 
   isInitialized(): boolean {
     return !!this.store;
+  }
+
+  async encryptMessage(remoteUserId: string, message: string): Promise<Signal.MessageType | null> {
+    if (!this.store) {
+      console.error('EncryptionService: Not initialized');
+      return null;
+    }
+
+    const address = new Signal.SignalProtocolAddress(remoteUserId, 1); // Device ID 1
+    const sessionCipher = new Signal.SessionCipher(this.store, address);
+
+    try {
+      // In a real flow, we would need to build a session first if it doesn't exist
+      // For this task, we assume session exists or we'll get an error
+      // Note: encrypt returns a CiphertextMessage object (type: number, body: string)
+      const ciphertext = await sessionCipher.encrypt(new TextEncoder().encode(message).buffer);
+      return ciphertext;
+    } catch (e) {
+      console.error(`EncryptionService: Failed to encrypt for ${remoteUserId}`, e);
+      return null;
+    }
   }
 }
 
