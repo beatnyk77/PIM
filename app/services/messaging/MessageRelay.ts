@@ -1,15 +1,8 @@
 import { io, Socket } from 'socket.io-client';
-import mitt from 'mitt';
-import { database, QueuedMessage } from '../storage/LocalDb';
-
-// Events that the Relay emits to the app
-type RelayEvents = {
-  'connected': void;
-  'disconnected': void;
-  'message': any;
-};
-
-export const relayEvents = mitt<RelayEvents>();
+import { database, QueuedMessage, saveMessageToDb } from '../storage/LocalDb';
+import { EncryptionService } from './EncryptionService';
+import { EventBus } from '../EventBus';
+import { useStore } from '../storage/StateManager';
 
 class MessageRelayService {
   private socket: Socket | null = null;
@@ -32,18 +25,78 @@ class MessageRelayService {
 
     this.socket.on('connect', () => {
       console.log('MessageRelay: Connected:', this.socket?.id);
-      relayEvents.emit('connected');
+      EventBus.emit('network.connected');
       this.processOfflineQueue();
+      
+      // Auto-join test group for MVP
+      this.joinGroup('test-group');
     });
 
     this.socket.on('disconnect', () => {
       console.log('MessageRelay: Disconnected');
-      relayEvents.emit('disconnected');
+      EventBus.emit('network.disconnected');
     });
 
     this.socket.on('message', (data: any) => {
       console.log('MessageRelay: Received message:', data);
-      relayEvents.emit('message', data);
+      EventBus.emit('message.received', data);
+    });
+
+    // Listen for encrypted chat messages
+    this.socket.on('chat-message', async (data: any) => {
+      // Expecting: { from: string, ciphertext: Signal.MessageType, timestamp: number, messageId: string }
+      console.log('MessageRelay: Received encrypted message from', data.from);
+      
+      try {
+        const decryptedContent = await EncryptionService.decryptMessage(data.from, data.ciphertext);
+        
+        if (decryptedContent) {
+          console.log('MessageRelay: Message decrypted successfully');
+          EventBus.emit('message.secure-received', {
+            from: data.from,
+            content: decryptedContent,
+            timestamp: data.timestamp || Date.now(),
+            messageId: data.messageId
+          });
+          
+          // Send Read Receipt automatically if successfully decrypted
+          // In a real app, this might be triggered by UI view
+          if (data.messageId) {
+             const { settings } = useStore.getState();
+             if (settings.readReceiptsEnabled) {
+                 this.sendReadReceipt(data.from, data.messageId);
+             }
+          }
+
+          // Persist message to DB immediately
+          await saveMessageToDb({
+              id: data.messageId,
+              content: decryptedContent,
+              senderId: data.from,
+              timestamp: data.timestamp || Date.now(),
+              isMe: false,
+              status: 'read', // Mark as read since we processed it? Or 'delivered'?
+              type: 'text'
+          });
+
+        } else {
+          console.warn('MessageRelay: Failed to decrypt message');
+        }
+      } catch (e) {
+        console.error('MessageRelay: Error handling encrypted message', e);
+      }
+    });
+
+    // Listen for read receipts
+    this.socket.on('read-receipt', (data: any) => {
+        console.log('MessageRelay: Received read receipt', data);
+        EventBus.emit('message.read-receipt', data);
+    });
+
+    // Listen for group messages
+    this.socket.on('group-message', (data: any) => {
+        console.log('MessageRelay: Received group message in', data.groupId);
+        EventBus.emit('message.group-received', data);
     });
 
     this.socket.on('connect_error', (err) => {
@@ -55,6 +108,64 @@ class MessageRelayService {
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
+    }
+  }
+
+  joinGroup(groupId: string) {
+      if (this.socket?.connected) {
+          this.socket.emit('join-group', groupId);
+      }
+  }
+
+  sendGroupMessage(groupId: string, content: string, type: string = 'text', mediaUri?: string) {
+      this.sendMessage('group-message', {
+          groupId,
+          content,
+          timestamp: Date.now(),
+          type,
+          mediaUri
+      });
+  }
+
+  sendReadReceipt(toUserId: string, messageId: string) {
+      this.sendMessage('read-receipt', {
+          to: toUserId,
+          messageId,
+          timestamp: Date.now()
+      });
+  }
+
+  async sendSecureMessage(toUserId: string, content: string) {
+    if (!EncryptionService.isInitialized()) {
+      console.error('MessageRelay: EncryptionService not initialized');
+      return;
+    }
+
+    try {
+      console.log(`MessageRelay: Encrypting message for ${toUserId}...`);
+      const ciphertext = await EncryptionService.encryptMessage(toUserId, content);
+      
+      if (!ciphertext) {
+        throw new Error('Encryption failed');
+      }
+
+      // Generate a temporary ID if one doesn't exist to track receipts
+      const messageId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+
+      const payload = {
+        to: toUserId,
+        ciphertext,
+        timestamp: Date.now(),
+        messageId,
+      };
+
+      // We use the generic 'chat-message' event for the relay
+      await this.sendMessage('chat-message', payload);
+      console.log('MessageRelay: Secure message sent (or queued)');
+      return messageId;
+    } catch (e) {
+      console.error('MessageRelay: Failed to send secure message', e);
+      return null;
     }
   }
 

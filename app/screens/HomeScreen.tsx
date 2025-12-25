@@ -1,30 +1,30 @@
-import { View, Text, Button } from 'react-native';
+import { View, Text, Button, FlatList, TouchableOpacity, SafeAreaView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useStore } from '../services/storage/StateManager';
 import { useEffect, useState } from 'react';
-import { testDbConnection } from '../services/storage/LocalDb';
 import { IdentityService } from '../services/auth/IdentityService';
-import { MessageRelay, relayEvents } from '../services/messaging/MessageRelay';
+import { MessageRelay } from '../services/messaging/MessageRelay';
+import { EventBus } from '../services/EventBus';
 
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
-  const { activeChat, setActiveChat } = useStore();
-  const [dbStatus, setDbStatus] = useState<string>('Connecting...');
-  const [identityStatus, setIdentityStatus] = useState<string>('Checking...');
+  const { messages, setActiveChat, setActiveGroup, hydrate } = useStore();
   const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected');
 
+  // Derive conversations from messages (simple logic for MVP)
+  // Group messages by senderId or groupId to form conversation list
+  // For now, we keep the static list but ideally we map `messages` to this.
+  const conversations = [
+      { id: 'test-chat-id', name: 'Alice (Test)', type: 'direct', lastMessage: 'Secure message...' },
+      { id: 'group-123', name: 'Project Alpha', type: 'group', lastMessage: 'Meeting at 5' },
+      // Add dynamic extraction later
+  ];
+
   useEffect(() => {
-    console.log('Current Active Chat:', activeChat);
-    setActiveChat('test-chat-id');
+    // Hydrate store from DB
+    hydrate();
 
-    // Test DB
-    testDbConnection().then(success => {
-      setDbStatus(success ? 'Connected' : 'Failed');
-    });
-
-    checkIdentity();
-
-    // Test MessageRelay
+    // Setup Relay
     const setupRelay = async () => {
        const keys = await IdentityService.loadKeys();
        if (keys) {
@@ -33,51 +33,78 @@ export default function HomeScreen() {
     };
     setupRelay();
 
-    // Listen for relay events
-    relayEvents.on('connected', () => setConnectionStatus('Connected'));
-    relayEvents.on('disconnected', () => setConnectionStatus('Disconnected'));
+    const onConnected = () => setConnectionStatus('Connected');
+    const onDisconnected = () => setConnectionStatus('Disconnected');
+
+    EventBus.on('network.connected', onConnected);
+    EventBus.on('network.disconnected', onDisconnected);
 
     return () => {
-      relayEvents.off('connected');
-      relayEvents.off('disconnected');
+      EventBus.off('network.connected', onConnected);
+      EventBus.off('network.disconnected', onDisconnected);
     }
   }, []);
 
-  const checkIdentity = async () => {
-    const existingKeys = await IdentityService.loadKeys();
-    if (existingKeys) {
-      setIdentityStatus(`Loaded (ID: ${existingKeys.registrationId})`);
-    } else {
-      setIdentityStatus('No keys found. Generating...');
-      const newKeys = await IdentityService.generateIdentity();
-      if (newKeys) {
-        setIdentityStatus(`Generated (ID: ${newKeys.registrationId})`);
+  const openChat = (id: string, type: string) => {
+      if (type === 'group') {
+          setActiveGroup(id);
       } else {
-        setIdentityStatus('Failed to generate');
+          setActiveChat(id);
       }
-    }
-  };
-
-  const resetIdentity = async () => {
-    await IdentityService.clearKeys();
-    setIdentityStatus('Keys Cleared');
-    setTimeout(checkIdentity, 1000);
+      navigation.navigate('Chat');
   };
 
   return (
-    <View className="flex-1 bg-background items-center justify-center">
-      <Text className="text-primary text-xl font-bold">Home Screen</Text>
-      <Text className="text-secondary mt-2">Navigation Works!</Text>
-      <Text className="text-secondary mt-2">Active Chat: {activeChat}</Text>
-      <Text className="text-accent mt-2">DB Status: {dbStatus}</Text>
-      <Text className="text-accent mt-2">Identity: {identityStatus}</Text>
-      <Text className="text-accent mt-2">Relay: {connectionStatus}</Text>
-      
-      <View className="mt-4 space-y-2">
-        <Button title="View Profile" onPress={() => navigation.navigate('Profile')} />
-        <Button title="Open Chat (Test)" onPress={() => navigation.navigate('Chat')} />
-        <Button title="Reset Identity" onPress={resetIdentity} color="red" />
+    <SafeAreaView className="flex-1 bg-gray-50">
+      <View className="px-4 py-4 flex-row justify-between items-center bg-white border-b border-gray-200">
+        <View>
+            <Text className="text-2xl font-bold text-gray-900">Chats</Text>
+            <Text className="text-xs text-gray-500">{connectionStatus}</Text>
+        </View>
+        <View className="flex-row gap-2">
+            <TouchableOpacity onPress={() => navigation.navigate('Commitments')} className="bg-orange-100 p-2 rounded-full">
+                <Text>📊</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('Profile')} className="bg-blue-100 p-2 rounded-full">
+                <Text>👤</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('Settings')} className="bg-gray-100 p-2 rounded-full">
+                <Text>⚙️</Text>
+            </TouchableOpacity>
+        </View>
       </View>
-    </View>
+
+      <FlatList
+        data={conversations}
+        keyExtractor={item => item.id}
+        renderItem={({ item }) => (
+            <TouchableOpacity 
+                onPress={() => openChat(item.id, item.type)}
+                className="bg-white p-4 border-b border-gray-100 flex-row items-center"
+            >
+                <View className={`w-12 h-12 rounded-full items-center justify-center mr-4 ${item.type === 'group' ? 'bg-purple-100' : 'bg-green-100'}`}>
+                    <Text className="text-lg">{item.type === 'group' ? '👥' : '👤'}</Text>
+                </View>
+                <View className="flex-1">
+                    <Text className="text-base font-semibold text-gray-900">{item.name}</Text>
+                    <Text className="text-gray-500 text-sm" numberOfLines={1}>{item.lastMessage}</Text>
+                </View>
+                <Text className="text-gray-400 text-xs">Now</Text>
+            </TouchableOpacity>
+        )}
+        ListEmptyComponent={
+            <View className="p-8 items-center">
+                <Text className="text-gray-400">No conversations yet.</Text>
+            </View>
+        }
+      />
+      
+      <TouchableOpacity 
+        className="absolute bottom-6 right-6 bg-blue-600 w-14 h-14 rounded-full items-center justify-center shadow-lg"
+        onPress={() => openChat('new-user', 'direct')}
+      >
+          <Text className="text-white text-2xl">+</Text>
+      </TouchableOpacity>
+    </SafeAreaView>
   );
 }

@@ -4,7 +4,7 @@ import { IdentityService } from '../auth/IdentityService';
 // We need to implement a basic SignalProtocolStore
 // For now, we'll use an in-memory store for the skeleton
 // In a real app, this should persist to SecureStore/LocalDb
-class InMemorySignalProtocolStore implements Signal.StorageType {
+export class InMemorySignalProtocolStore implements Signal.StorageType {
   private identityKeyPair: Signal.KeyPairType | undefined;
   private localRegistrationId: number | undefined;
   private sessions: Map<string, string> = new Map();
@@ -88,6 +88,37 @@ class EncryptionServiceClass {
       return ciphertext;
     } catch (e) {
       console.error(`EncryptionService: Failed to encrypt for ${remoteUserId}`, e);
+      return null;
+    }
+  }
+
+  async decryptMessage(remoteUserId: string, ciphertext: Signal.MessageType): Promise<string | null> {
+    if (!this.store) {
+      console.error('EncryptionService: Not initialized');
+      return null;
+    }
+
+    const address = new Signal.SignalProtocolAddress(remoteUserId, 1);
+    const sessionCipher = new Signal.SessionCipher(this.store, address);
+
+    try {
+      let plaintextBuffer: ArrayBuffer;
+      
+      // Handle different message types
+      // Type 3: PreKeyWhisperMessage (initial message)
+      // Type 1: WhisperMessage (subsequent messages)
+      if (ciphertext.type === 3) {
+        plaintextBuffer = await sessionCipher.decryptPreKeyWhisperMessage(ciphertext.body as string, 'binary');
+      } else if (ciphertext.type === 1) {
+        plaintextBuffer = await sessionCipher.decryptWhisperMessage(ciphertext.body as string, 'binary');
+      } else {
+        console.warn('EncryptionService: Unknown message type', ciphertext.type);
+        return null;
+      }
+
+      return new TextDecoder().decode(plaintextBuffer);
+    } catch (e) {
+      console.error(`EncryptionService: Failed to decrypt from ${remoteUserId}`, e);
       return null;
     }
   }

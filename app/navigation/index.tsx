@@ -3,6 +3,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import HomeScreen from '../screens/HomeScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import ChatScreen from '../screens/ChatScreen';
+import CommitmentsScreen from '../screens/CommitmentsScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -25,6 +27,16 @@ export default function AppNavigator() {
           name="Chat" 
           component={ChatScreen} 
           options={{ headerShown: true, title: 'Chat' }}
+        />
+        <Stack.Screen 
+          name="Commitments" 
+          component={CommitmentsScreen} 
+          options={{ headerShown: true, title: 'Dashboard' }}
+        />
+        <Stack.Screen 
+          name="Settings" 
+          component={SettingsScreen} 
+          options={{ headerShown: false }}
         />
       </Stack.Navigator>
     </NavigationContainer>

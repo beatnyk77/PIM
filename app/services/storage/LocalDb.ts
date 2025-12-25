@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Database } from '@nozbe/watermelondb';
+import { Database, Q } from '@nozbe/watermelondb';
 import SQLiteAdapter from '@nozbe/watermelondb/adapters/sqlite';
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 import { Model } from '@nozbe/watermelondb';
@@ -29,13 +29,17 @@ export function decryptData(cipherText: string): string {
 
 // 1. Define Schema
 export const mySchema = appSchema({
-  version: 2,
+  version: 3,
   tables: [
     tableSchema({
       name: 'messages',
       columns: [
+        { name: 'message_id', type: 'string', isIndexed: true },
         { name: 'content', type: 'string' },
         { name: 'sender_id', type: 'string' },
+        { name: 'is_me', type: 'boolean' },
+        { name: 'status', type: 'string' }, // sent, delivered, read
+        { name: 'type', type: 'string' }, // text, image, audio
         { name: 'created_at', type: 'number' },
       ],
     }),
@@ -54,8 +58,12 @@ export const mySchema = appSchema({
 export class Message extends Model {
   static table = 'messages';
 
+  @text('message_id') messageId!: string;
   @text('content') _content!: string; // Store encrypted content here
   @text('sender_id') senderId!: string;
+  @field('is_me') isMe!: boolean;
+  @text('status') status!: string;
+  @text('type') type!: string;
   @date('created_at') createdAt!: Date;
 
   // Virtual property for decrypted content
@@ -96,7 +104,52 @@ export const database = new Database({
   ],
 });
 
-// 5. Test Function
+// 5. Helpers
+export const getMessages = async () => {
+    try {
+        const messages = await database.get<Message>('messages').query().fetch();
+        return messages.map(m => ({
+            id: m.messageId,
+            content: m.content, // Decrypts automatically
+            senderId: m.senderId,
+            isMe: m.isMe,
+            status: m.status as any,
+            type: m.type as any,
+            timestamp: m.createdAt
+        }));
+    } catch (e) {
+        console.error('Error fetching messages:', e);
+        return [];
+    }
+};
+
+export const saveMessageToDb = async (msg: any) => {
+    try {
+        const collection = database.get<Message>('messages');
+        const existing = await collection.query(Q.where('message_id', msg.id)).fetch();
+        
+        if (existing.length > 0) {
+            // Already exists, maybe update status?
+            return;
+        }
+
+        await database.write(async () => {
+            await collection.create(m => {
+                m.messageId = msg.id;
+                m.content = msg.content; // Encrypts automatically
+                m.senderId = msg.senderId;
+                m.isMe = msg.isMe;
+                m.status = msg.status || 'sent';
+                m.type = msg.type || 'text';
+                m.createdAt = new Date(msg.timestamp);
+            });
+        });
+    } catch (e) {
+        console.error('Error saving message:', e);
+    }
+};
+
+// 6. Test Function
 export async function testDbConnection() {
   try {
     const messageCount = await database.get<Message>('messages').query().fetchCount();
