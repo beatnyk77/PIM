@@ -1,11 +1,12 @@
 import { io, Socket } from 'socket.io-client';
 import mitt from 'mitt';
+import { database, QueuedMessage } from '../storage/LocalDb';
 
 // Events that the Relay emits to the app
 type RelayEvents = {
   'connected': void;
   'disconnected': void;
-  'message': any; // We'll define a stricter type later
+  'message': any;
 };
 
 export const relayEvents = mitt<RelayEvents>();
@@ -32,6 +33,7 @@ class MessageRelayService {
     this.socket.on('connect', () => {
       console.log('MessageRelay: Connected:', this.socket?.id);
       relayEvents.emit('connected');
+      this.processOfflineQueue();
     });
 
     this.socket.on('disconnect', () => {
@@ -56,12 +58,56 @@ class MessageRelayService {
     }
   }
 
-  sendMessage(event: string, data: any) {
+  async sendMessage(event: string, data: any) {
     if (this.socket?.connected) {
       this.socket.emit(event, data);
     } else {
-      console.warn('MessageRelay: Cannot send, socket not connected');
-      // TODO: Queue message for later (Task 15)
+      console.log('MessageRelay: Offline. Queuing message...');
+      try {
+        await database.write(async () => {
+          await database.get<QueuedMessage>('queued_messages').create(msg => {
+            msg.event = event;
+            msg.data = JSON.stringify(data);
+            msg.createdAt = new Date();
+          });
+        });
+        console.log('MessageRelay: Message queued successfully.');
+      } catch (e) {
+        console.error('MessageRelay: Failed to queue message', e);
+      }
+    }
+  }
+
+  private async processOfflineQueue() {
+    try {
+      const queuedMessages = await database.get<QueuedMessage>('queued_messages').query().fetch();
+      
+      if (queuedMessages.length === 0) return;
+
+      console.log(`MessageRelay: Processing ${queuedMessages.length} queued messages...`);
+
+      // Process strictly in order
+      // Note: In a real app, we might want to batch this or handle failures more robustly
+      for (const msg of queuedMessages) {
+        if (this.socket?.connected) {
+          try {
+             const data = JSON.parse(msg.data);
+             this.socket.emit(msg.event, data);
+             
+             // Remove from DB after sending
+             await database.write(async () => {
+               await msg.destroyPermanently();
+             });
+          } catch (e) {
+            console.error('MessageRelay: Failed to process queued message', e);
+          }
+        } else {
+          console.warn('MessageRelay: Connection lost while processing queue.');
+          break;
+        }
+      }
+    } catch (e) {
+      console.error('MessageRelay: Error reading queue', e);
     }
   }
 

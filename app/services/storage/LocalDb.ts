@@ -29,13 +29,21 @@ export function decryptData(cipherText: string): string {
 
 // 1. Define Schema
 export const mySchema = appSchema({
-  version: 1,
+  version: 2,
   tables: [
     tableSchema({
       name: 'messages',
       columns: [
         { name: 'content', type: 'string' },
         { name: 'sender_id', type: 'string' },
+        { name: 'created_at', type: 'number' },
+      ],
+    }),
+    tableSchema({
+      name: 'queued_messages',
+      columns: [
+        { name: 'event', type: 'string' },
+        { name: 'data', type: 'string' },
         { name: 'created_at', type: 'number' },
       ],
     }),
@@ -60,6 +68,14 @@ export class Message extends Model {
   }
 }
 
+export class QueuedMessage extends Model {
+  static table = 'queued_messages';
+
+  @text('event') event!: string;
+  @text('data') data!: string; // JSON string
+  @date('created_at') createdAt!: Date;
+}
+
 // 3. Create Adapter
 const adapter = new SQLiteAdapter({
   schema: mySchema,
@@ -76,6 +92,7 @@ export const database = new Database({
   adapter,
   modelClasses: [
     Message,
+    QueuedMessage,
   ],
 });
 
