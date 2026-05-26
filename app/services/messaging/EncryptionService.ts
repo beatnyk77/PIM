@@ -272,6 +272,12 @@ class EncryptionServiceClass {
       };
 
       await sessionBuilder.processPreKey(formattedBundle);
+      this.cryptoLog('Establish Classical Session', {
+        remoteUserId,
+        registrationId: bundle.registrationId,
+        identityKey: bundle.identityKey,
+        signedPreKey: bundle.signedPreKey?.publicKey,
+      });
       console.log(`EncryptionService: Cryptographic session established with ${remoteUserId}`);
       return true;
     } catch (e) {
@@ -344,6 +350,14 @@ class EncryptionServiceClass {
         opkId: opkId
       };
       await saveSignalStoreValue(`pq_handshake_outbound:${remoteUserId}`, JSON.stringify(handshakeInfo));
+      this.cryptoLog('Establish Hybrid Session', {
+        remoteUserId,
+        pqIdentityKey: bundle.pqIdentityKey,
+        pqSignedPreKey: bundle.pqSignedPreKey?.publicKey,
+        ssSpkSize: ssSpk.byteLength,
+        ssOpkSize: ssOpk ? ssOpk.byteLength : 0,
+        derivedK_pq: K_pq,
+      });
       console.log(`EncryptionService: Hybrid KEM master key successfully established for ${remoteUserId}`);
 
       return true;
@@ -424,6 +438,14 @@ class EncryptionServiceClass {
         ctOpk: handshakeInfo?.ctOpk,
         opkId: handshakeInfo?.opkId
       };
+
+      this.cryptoLog('Encrypt Hybrid Message', {
+        remoteUserId,
+        pqSessionKey: K_pq,
+        ephemeralPk: arrayBufferToBase64(ePk.buffer as ArrayBuffer),
+        ratchetedKey: ctEpkBase64 ? 'Yes' : 'No',
+        symmetricNonce: symmetricResult.iv,
+      });
 
       return envelope;
     } catch (e) {
@@ -528,6 +550,12 @@ class EncryptionServiceClass {
       }
 
       // 5. Decrypt inner classic layer
+      this.cryptoLog('Decrypt Hybrid Message', {
+        remoteUserId,
+        pqSessionKey: K_pq,
+        ctEphemeral: envelope.ct_ephemeral ? 'Present' : 'Absent',
+        handshakeSpk: envelope.ctSpk ? 'Present' : 'Absent',
+      });
       return this.decryptMessage(remoteUserId, parsedClassic);
     } catch (e) {
       console.error('EncryptionService: Failed hybrid decryption', e);
@@ -614,6 +642,24 @@ class EncryptionServiceClass {
     }
   }
 
+  private cryptoLog(event: string, details: any) {
+    const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : true;
+    if (isDev) {
+      const cleansed: any = {};
+      for (const key in details) {
+        const val = details[key];
+        if (typeof val === 'string' && (val.length > 32 || key.toLowerCase().includes('key') || key.toLowerCase().includes('secret') || key.toLowerCase().includes('seed') || key.toLowerCase().includes('priv') || key.toLowerCase().includes('sk'))) {
+          cleansed[key] = `[REDACTED_SECRET_SHA256:${CryptoJS.SHA256(val).toString().substring(0, 12)}...]`;
+        } else if (typeof val === 'object' && val !== null) {
+          cleansed[key] = '[OBJECT]';
+        } else {
+          cleansed[key] = val;
+        }
+      }
+      console.log(`[🔐 CRYPTO AUDIT] ${event}:`, JSON.stringify(cleansed));
+    }
+  }
+
   async getOrGenerateGroupSenderKey(groupId: string): Promise<string> {
     const keys = await IdentityService.loadKeys();
     if (!keys) throw new Error("Local identity keys not loaded");
@@ -625,6 +671,11 @@ class EncryptionServiceClass {
       key = randBytes.toString(CryptoJS.enc.Hex);
       await saveGroupSenderKeyToDb(groupId, myId, key);
     }
+    this.cryptoLog('Get/Generate Group Sender Key', {
+      groupId,
+      senderId: myId,
+      senderKey: key,
+    });
     return key;
   }
 
@@ -646,6 +697,15 @@ class EncryptionServiceClass {
       iv: iv,
       mode: CryptoJS.mode.CBC,
       padding: CryptoJS.pad.Pkcs7
+    });
+
+    this.cryptoLog('Encrypt Group Message', {
+      groupId,
+      myId,
+      currentSenderKey,
+      derivedMessageKey: K_msg,
+      nextSenderKey,
+      iv: iv.toString(),
     });
 
     return {
@@ -686,6 +746,15 @@ class EncryptionServiceClass {
 
       await saveGroupSenderKeyToDb(groupId, senderId, nextSenderKey);
 
+      this.cryptoLog('Decrypt Group Message', {
+        groupId,
+        senderId,
+        currentSenderKey,
+        derivedMessageKey: K_msg,
+        nextSenderKey,
+        iv: envelope.iv,
+      });
+
       return plaintext;
     } catch (e) {
       console.error(`decryptGroupMessage: Failed to decrypt group message from ${senderId}`, e);
@@ -713,6 +782,13 @@ class EncryptionServiceClass {
       const encryptedUri = fileUri + '.enc';
       await FileSystem.writeAsStringAsync(encryptedUri, ciphertext, {
         encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      this.cryptoLog('Encrypt Media', {
+        fileUri,
+        encryptedUri,
+        symmetricKey: keyHex,
+        symmetricIv: ivHex,
       });
 
       return { encryptedUri, key: keyHex, iv: ivHex };
@@ -743,6 +819,13 @@ class EncryptionServiceClass {
       const decryptedUri = encryptedUri.replace('.enc', '') + '_decrypted';
       await FileSystem.writeAsStringAsync(decryptedUri, plaintextBase64, {
         encoding: FileSystem.EncodingType.Base64,
+      });
+
+      this.cryptoLog('Decrypt Media', {
+        encryptedUri,
+        decryptedUri,
+        symmetricKey: keyHex,
+        symmetricIv: ivHex,
       });
 
       return decryptedUri;

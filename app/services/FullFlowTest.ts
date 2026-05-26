@@ -3,7 +3,8 @@ import { IdentityService } from './auth/IdentityService';
 import { MessageRelay } from './messaging/MessageRelay';
 import { AiAdvisor } from './ai/AiAdvisor';
 import { useStore } from './storage/StateManager';
-import { getMessages, saveMessageToDb } from './storage/LocalDb';
+import { getMessages, saveMessageToDb, database, QueuedMessage } from './storage/LocalDb';
+import { EncryptionService } from './messaging/EncryptionService';
 
 export class FullFlowTest {
     private logs: string[] = [];
@@ -110,6 +111,108 @@ export class FullFlowTest {
             this.log(`CRITICAL FAIL: ${e.message}`);
             console.error(e);
             return this.logs;
+        }
+    }
+
+    async runNetworkStressTest(): Promise<boolean> {
+        this.log('\n==================================================');
+        this.log('🧪 RUNNING TASK 5.1: NETWORK STRESS & DISCONNECT TEST');
+        this.log('==================================================');
+
+        try {
+            const queuedCollection = database.get<QueuedMessage>('queued_messages');
+            
+            const initialQueued = await queuedCollection.query().fetch();
+            if (initialQueued.length > 0) {
+                this.log(`Clearing ${initialQueued.length} legacy queued messages...`);
+                await database.write(async () => {
+                    for (const m of initialQueued) {
+                        await m.destroyPermanently();
+                    }
+                });
+            }
+
+            let keys = await IdentityService.loadKeys();
+            if (!keys) {
+                keys = await IdentityService.generateIdentity();
+            }
+            await EncryptionService.initialize();
+
+            const testBundle = await IdentityService.generatePreKeyBundle(keys!);
+            await EncryptionService.establishHybridSession('stress-recipient', testBundle);
+
+            this.log('Injecting simulated flickering socket connection...');
+            const originalSocket = (MessageRelay as any).socket;
+            
+            let socketConnected = true;
+            const mockSocket = {
+                connected: socketConnected,
+                emit: (event: string, data: any) => {
+                    if (!socketConnected) {
+                        throw new Error("Simulated network link down!");
+                    }
+                }
+            };
+            (MessageRelay as any).socket = mockSocket;
+
+            this.log('Dispatching 100 E2EE messages in rapid succession with 10% packet link flicker...');
+            let directlySent = 0;
+            let queuedOffline = 0;
+
+            for (let i = 1; i <= 100; i++) {
+                if (i % 10 === 0) {
+                    socketConnected = !socketConnected;
+                    mockSocket.connected = socketConnected;
+                    this.log(`[Link Alert] Network transitioned to: ${socketConnected ? 'ONLINE' : 'OFFLINE'}`);
+                }
+
+                const content = `Stress message #${i}`;
+                await MessageRelay.sendSecureMessage('stress-recipient', content);
+                
+                if (socketConnected) {
+                    directlySent++;
+                } else {
+                    queuedOffline++;
+                }
+            }
+
+            this.log(`Completed 100 stress dispatches:`);
+            this.log(`  - Directly sent (Online): ${directlySent}`);
+            this.log(`  - Queued offline (Offline): ${queuedOffline}`);
+
+            this.log('Verifying SQLite offline queue writes...');
+            const queuedAfterSend = await queuedCollection.query().fetch();
+            this.log(`  - Count of queued_messages records in database: ${queuedAfterSend.length}`);
+            
+            if (queuedAfterSend.length !== queuedOffline) {
+                throw new Error(`Offline write desync: Expected ${queuedOffline} queued messages, found ${queuedAfterSend.length} in DB`);
+            }
+            this.log('✅ SQLite transaction integrity verified under offline partition!');
+
+            this.log('Simulating network link recovery (ONLINE)...');
+            socketConnected = true;
+            mockSocket.connected = true;
+
+            this.log('Flushing offline queue and ratcheting messages sequentially...');
+            await (MessageRelay as any).processOfflineQueue();
+
+            const queuedFinal = await queuedCollection.query().fetch();
+            this.log(`  - Final queued_messages count in database: ${queuedFinal.length}`);
+            
+            if (queuedFinal.length !== 0) {
+                throw new Error(`Failed to flush database queue: ${queuedFinal.length} messages still pending`);
+            }
+
+            (MessageRelay as any).socket = originalSocket;
+
+            this.log('✅ Network stress & sync verification test completed successfully!');
+            console.log('==================================================\n');
+            return true;
+            
+        } catch (e: any) {
+            this.log(`❌ NETWORK STRESS TEST FAILED: ${e.message}`);
+            console.error(e);
+            return false;
         }
     }
 }
