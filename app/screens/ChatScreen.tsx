@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, SafeAreaView, KeyboardAvoidingView, Platform, TextInput, TouchableOpacity, Text, ActivityIndicator } from 'react-native';
+import { View, SafeAreaView, KeyboardAvoidingView, Platform, TextInput, TouchableOpacity, Text, ActivityIndicator, Modal, ScrollView } from 'react-native';
 import ChatThread from '../components/ChatThread';
 import { useStore, ChatMessage } from '../services/storage/StateManager';
 import { AiAdvisor } from '../services/ai/AiAdvisor';
@@ -10,6 +10,7 @@ import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import * as ScreenCapture from 'expo-screen-capture';
 import { useCommitmentStore } from '../stores/useCommitmentStore';
+import { EncryptionService } from '../services/messaging/EncryptionService';
 
 export default function ChatScreen() {
   const { messages, addMessage, setMessages, updateMessageStatus, activeChat, activeGroup, setActiveGroup, setActiveChat, settings, deleteMessage } = useStore();
@@ -17,6 +18,7 @@ export default function ChatScreen() {
   const [inputText, setInputText] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [detectedTone, setDetectedTone] = useState<Tone | null>(null);
+  const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   
   // Delayed Send State
@@ -25,6 +27,22 @@ export default function ChatScreen() {
 
   // Self Destruct State
   const [isEphemeral, setIsEphemeral] = useState(false);
+
+  // Safety Number State
+  const [safetyNumber, setSafetyNumber] = useState<string | null>(null);
+  const [showSafetyModal, setShowSafetyModal] = useState(false);
+
+  useEffect(() => {
+    const fetchSafetyNumber = async () => {
+      if (activeChat) {
+        const num = await EncryptionService.getSafetyNumber(activeChat);
+        setSafetyNumber(num);
+      } else {
+        setSafetyNumber(null);
+      }
+    };
+    fetchSafetyNumber();
+  }, [activeChat]);
 
   useEffect(() => {
     // Check for expired messages
@@ -108,25 +126,16 @@ export default function ChatScreen() {
       }
     };
 
-    const onTaskDetected = (data: { chatId: string, task: string, originalContent: string }) => {
-        // Automatically add to commitments if it comes from the active chat
-        // or maybe just add it globally.
-        console.log('ChatScreen: Auto-adding task:', data.task);
-        commitmentStore.addCommitment(data.task, 'Today');
-    };
-
     EventBus.on('message.received', onMessage);
     EventBus.on('message.secure-received', onSecureMessage);
     EventBus.on('message.group-received', onGroupMessage);
     EventBus.on('message.read-receipt', onReadReceipt);
-    EventBus.on('ai.task-detected', onTaskDetected);
 
     return () => {
       EventBus.off('message.received', onMessage);
       EventBus.off('message.secure-received', onSecureMessage);
       EventBus.off('message.group-received', onGroupMessage);
       EventBus.off('message.read-receipt', onReadReceipt);
-      EventBus.off('ai.task-detected', onTaskDetected);
     };
   }, [addMessage, updateMessageStatus, activeGroup]);
 
@@ -235,6 +244,7 @@ export default function ChatScreen() {
 
     addMessage(newMessage);
     setDetectedTone(null);
+    setSuggestedReplies([]);
 
     // Send via Relay
     if (activeGroup) {
@@ -308,9 +318,9 @@ export default function ChatScreen() {
 
     setIsAiLoading(true);
     try {
-      // 1. Suggest Reply
-      const suggestion = await AiAdvisor.suggestReply(lastReceived.content);
-      setInputText(suggestion);
+      // 1. Suggest Reply options
+      const suggestions = await AiAdvisor.suggestReplies(lastReceived.content);
+      setSuggestedReplies(suggestions);
 
       // 2. Detect Tone (of the last message)
       const tone = await ToneDetector.detectTone(lastReceived.content);
@@ -322,15 +332,33 @@ export default function ChatScreen() {
     }
   };
 
+  const handleSuggestionTap = (reply: string) => {
+    setInputText(reply);
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-white">
       {/* Header */}
-      <View className="p-4 border-b border-gray-200 flex-row justify-between items-center">
-        <Text className="text-xl font-bold">
-            {activeGroup ? `Group: ${activeGroup}` : `Chat with ${activeChat}`}
-        </Text>
+      <View className="p-4 border-b border-gray-200 flex-row justify-between items-center bg-gray-50/50">
+        <View>
+          <View className="flex-row items-center">
+            <Text className="text-xl font-bold text-gray-900">
+                {activeGroup ? `Group: ${activeGroup}` : `Chat with ${activeChat}`}
+            </Text>
+            {!activeGroup && safetyNumber && (
+              <TouchableOpacity onPress={() => setShowSafetyModal(true)} className="ml-2 bg-green-50 px-2 py-0.5 rounded-full border border-green-200 flex-row items-center">
+                <Text className="text-[10px] text-green-700 font-bold">🔒 Verified</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          {detectedTone && (
+            <Text className="text-xs text-gray-500 mt-0.5">
+              Current Tone: <Text className="font-semibold text-purple-600 capitalize">{detectedTone}</Text>
+            </Text>
+          )}
+        </View>
         <TouchableOpacity onPress={toggleGroupMode}>
-            <Text className="text-blue-500">{activeGroup ? 'Exit Group' : 'Join Group'}</Text>
+            <Text className="text-blue-500 font-semibold">{activeGroup ? 'Exit Group' : 'Join Group'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -340,26 +368,48 @@ export default function ChatScreen() {
 
       {/* AI Toolbar */}
       {settings.aiEnabled && (
-      <View className="px-4 py-2 flex-row justify-between items-center bg-gray-50 border-t border-gray-200">
-        <View>
-            {detectedTone && (
-                <Text className="text-xs text-gray-500">
-                    Tone: <Text className="font-bold capitalize">{detectedTone}</Text>
-                </Text>
-            )}
+        <View className="bg-gray-50 border-t border-gray-200 py-2.5">
+          {suggestedReplies.length > 0 ? (
+            <View className="px-4">
+              <View className="flex-row justify-between items-center mb-1.5">
+                <Text className="text-[10px] uppercase font-bold tracking-wider text-gray-400">✨ Smart Replies</Text>
+                <TouchableOpacity onPress={() => setSuggestedReplies([])}>
+                  <Text className="text-[10px] text-gray-400 font-semibold">Clear</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false} 
+                className="flex-row py-1"
+              >
+                {suggestedReplies.map((reply, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    onPress={() => handleSuggestionTap(reply)}
+                    className="bg-purple-50 border border-purple-200 px-4 py-2 rounded-full mr-2.5 active:bg-purple-100 shadow-sm"
+                  >
+                    <Text className="text-purple-800 text-xs font-medium">{reply}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          ) : (
+            <View className="px-4 flex-row justify-between items-center">
+              <Text className="text-xs text-gray-400 italic">No suggestions generated yet</Text>
+              <TouchableOpacity 
+                onPress={handleSuggestReply} 
+                disabled={isAiLoading}
+                className="bg-purple-100 px-4 py-1.5 rounded-full flex-row items-center active:bg-purple-200"
+              >
+                {isAiLoading ? (
+                  <ActivityIndicator size="small" color="#9333ea" className="mr-1" />
+                ) : (
+                  <Text className="text-purple-700 text-xs font-semibold">✨ Suggest Replies</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
-        <TouchableOpacity 
-            onPress={handleSuggestReply} 
-            disabled={isAiLoading}
-            className="bg-purple-100 px-3 py-1 rounded-full"
-        >
-            {isAiLoading ? (
-                <ActivityIndicator size="small" color="#9333ea" />
-            ) : (
-                <Text className="text-purple-700 text-xs font-semibold">✨ Suggest Reply</Text>
-            )}
-        </TouchableOpacity>
-      </View>
       )}
 
       {/* Delayed Send Indicator */}
@@ -414,6 +464,36 @@ export default function ChatScreen() {
           </TouchableOpacity>
         )}
       </KeyboardAvoidingView>
+      {/* Safety Numbers Modal Drawer */}
+      <Modal
+        visible={showSafetyModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowSafetyModal(false)}
+      >
+        <View className="flex-1 justify-end bg-black/50">
+          <View className="bg-white p-6 rounded-t-3xl shadow-xl">
+            <Text className="text-xl font-bold text-gray-900 mb-2">E2EE Security Verification</Text>
+            <Text className="text-gray-500 text-sm mb-4">
+              To verify that this chat session is securely encrypted and completely protected against middleman attacks, compare these fingerprints with the safety number visible on your contact's device.
+            </Text>
+            
+            <View className="bg-gray-50 border border-gray-200 p-4 rounded-xl items-center mb-6">
+              <Text className="text-xs font-semibold text-gray-400 mb-2 tracking-wider">🔒 SAFETY NUMBER FINGERPRINT</Text>
+              <Text className="text-base font-mono text-gray-800 text-center font-bold break-words px-2 tracking-widest leading-loose">
+                {safetyNumber}
+              </Text>
+            </View>
+
+            <TouchableOpacity 
+              onPress={() => setShowSafetyModal(false)}
+              className="bg-blue-600 w-full py-3.5 rounded-full items-center shadow-md active:bg-blue-700"
+            >
+              <Text className="text-white font-bold">I Have Verified Fingerprints</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

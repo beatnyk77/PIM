@@ -3,6 +3,7 @@ import { database, QueuedMessage, saveMessageToDb } from '../storage/LocalDb';
 import { EncryptionService } from './EncryptionService';
 import { EventBus } from '../EventBus';
 import { useStore } from '../storage/StateManager';
+import { IdentityService } from '../auth/IdentityService';
 
 class MessageRelayService {
   private socket: Socket | null = null;
@@ -21,6 +22,10 @@ class MessageRelayService {
       transports: ['websocket'],
       autoConnect: true,
       reconnection: true,
+      reconnectionAttempts: Infinity, // Infinite reconnect attempts to guarantee offline-first recovery
+      reconnectionDelay: 1000,        // Start backoff at 1 second
+      reconnectionDelayMax: 30000,    // Caps max reconnection interval at 30 seconds to optimize battery
+      randomizationFactor: 0.5,       // 50% random jitter to mitigate thundering herd spikes on relay boot
     });
 
     this.socket.on('connect', () => {
@@ -30,6 +35,15 @@ class MessageRelayService {
       
       // Auto-join test group for MVP
       this.joinGroup('test-group');
+
+      // Auto-register public E2EE key bundle
+      this.registerKeys();
+
+      // Listen for E2EE keys replenishment requests
+      this.socket!.on('replenish-keys', async (data: any) => {
+        console.log(`MessageRelay: Server reports E2EE prekeys running low (${data.remaining}). Replenishing pool...`);
+        await this.replenishKeys();
+      });
     });
 
     this.socket.on('disconnect', () => {
@@ -44,11 +58,10 @@ class MessageRelayService {
 
     // Listen for encrypted chat messages
     this.socket.on('chat-message', async (data: any) => {
-      // Expecting: { from: string, ciphertext: Signal.MessageType, timestamp: number, messageId: string }
       console.log('MessageRelay: Received encrypted message from', data.from);
       
       try {
-        const decryptedContent = await EncryptionService.decryptMessage(data.from, data.ciphertext);
+        const decryptedContent = await EncryptionService.decryptHybridMessage(data.from, data.ciphertext);
         
         if (decryptedContent) {
           console.log('MessageRelay: Message decrypted successfully');
@@ -59,8 +72,6 @@ class MessageRelayService {
             messageId: data.messageId
           });
           
-          // Send Read Receipt automatically if successfully decrypted
-          // In a real app, this might be triggered by UI view
           if (data.messageId) {
              const { settings } = useStore.getState();
              if (settings.readReceiptsEnabled) {
@@ -68,14 +79,13 @@ class MessageRelayService {
              }
           }
 
-          // Persist message to DB immediately
           await saveMessageToDb({
               id: data.messageId,
               content: decryptedContent,
               senderId: data.from,
               timestamp: data.timestamp || Date.now(),
               isMe: false,
-              status: 'read', // Mark as read since we processed it? Or 'delivered'?
+              status: 'read',
               type: 'text'
           });
 
@@ -101,6 +111,84 @@ class MessageRelayService {
 
     this.socket.on('connect_error', (err) => {
       console.log('MessageRelay: Connection Error:', err.message);
+    });
+  }
+
+  async registerKeys() {
+    if (!this.socket?.connected) {
+      console.warn('MessageRelay: Socket not connected. Cannot register keys.');
+      return;
+    }
+
+    const keys = await IdentityService.loadKeys();
+    if (!keys) {
+      console.warn('MessageRelay: No identity keys found to register.');
+      return;
+    }
+
+    console.log('MessageRelay: Preparing PreKey bundle...');
+    const bundle = await IdentityService.generatePreKeyBundle(keys);
+    if (!bundle) {
+      console.error('MessageRelay: Failed to generate or load prekey bundle.');
+      return;
+    }
+
+    console.log('MessageRelay: Registering prekeys bundle with server...');
+    this.socket.emit('register-keys', bundle, (res: any) => {
+      if (res && res.success) {
+        console.log('MessageRelay: Keys successfully registered on relay server.');
+      } else {
+        console.error('MessageRelay: Key registration failed:', res?.error);
+      }
+    });
+  }
+
+  async replenishKeys() {
+    if (!this.socket?.connected) {
+      console.warn('MessageRelay: Socket not connected. Cannot replenish keys.');
+      return;
+    }
+
+    const keys = await IdentityService.loadKeys();
+    if (!keys) {
+      console.warn('MessageRelay: No identity keys found to replenish.');
+      return;
+    }
+
+    console.log('MessageRelay: Generating a fresh E2EE prekey bundle...');
+    const bundle = await IdentityService.generatePreKeyBundle(keys, true); // forceRegenerate = true
+    if (!bundle) {
+      console.error('MessageRelay: Failed to replenish prekey bundle.');
+      return;
+    }
+
+    console.log('MessageRelay: Uploading replenished prekeys to server...');
+    this.socket.emit('register-keys', bundle, (res: any) => {
+      if (res && res.success) {
+        console.log('MessageRelay: Prekeys pool successfully replenished on server!');
+      } else {
+        console.error('MessageRelay: Replenish upload failed:', res?.error);
+      }
+    });
+  }
+
+  fetchPreKeyBundle(targetUserId: string): Promise<any | null> {
+    return new Promise((resolve) => {
+      if (!this.socket?.connected) {
+        console.warn('MessageRelay: Socket not connected. Cannot fetch prekey bundle.');
+        resolve(null);
+        return;
+      }
+
+      console.log(`MessageRelay: Fetching prekey bundle for ${targetUserId} from server...`);
+      this.socket.emit('fetch-keys', targetUserId, (res: any) => {
+        if (res && res.success && res.bundle) {
+          resolve(res.bundle);
+        } else {
+          console.warn(`MessageRelay: Failed to fetch prekey bundle for ${targetUserId}:`, res?.error);
+          resolve(null);
+        }
+      });
     });
   }
 
@@ -138,18 +226,31 @@ class MessageRelayService {
   async sendSecureMessage(toUserId: string, content: string) {
     if (!EncryptionService.isInitialized()) {
       console.error('MessageRelay: EncryptionService not initialized');
-      return;
+      return null;
     }
 
     try {
+      const sessionExists = await EncryptionService.hasSession(toUserId);
+      if (!sessionExists) {
+        console.log(`MessageRelay: No active session for ${toUserId}. Initiating handshake...`);
+        const bundle = await this.fetchPreKeyBundle(toUserId);
+        if (!bundle) {
+          throw new Error(`E2EE bundle for recipient ${toUserId} not found on server.`);
+        }
+
+        const success = await EncryptionService.establishHybridSession(toUserId, bundle);
+        if (!success) {
+          throw new Error(`Cryptographic handshake with ${toUserId} failed.`);
+        }
+      }
+
       console.log(`MessageRelay: Encrypting message for ${toUserId}...`);
-      const ciphertext = await EncryptionService.encryptMessage(toUserId, content);
+      const ciphertext = await EncryptionService.encryptHybridMessage(toUserId, content);
       
       if (!ciphertext) {
         throw new Error('Encryption failed');
       }
 
-      // Generate a temporary ID if one doesn't exist to track receipts
       const messageId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
 
       const payload = {
@@ -159,9 +260,8 @@ class MessageRelayService {
         messageId,
       };
 
-      // We use the generic 'chat-message' event for the relay
       await this.sendMessage('chat-message', payload);
-      console.log('MessageRelay: Secure message sent (or queued)');
+      console.log('MessageRelay: Secure hybrid message sent (or queued)');
       return messageId;
     } catch (e) {
       console.error('MessageRelay: Failed to send secure message', e);

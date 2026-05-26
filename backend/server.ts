@@ -58,7 +58,41 @@ io.on('connection', (socket: Socket) => {
     const bundle = keyRegistry.get(targetUserId);
     
     if (bundle) {
-      if (ack) ack({ success: true, bundle });
+      // Deep clone public bundle values
+      const yieldedBundle = {
+        registrationId: bundle.registrationId,
+        identityKey: bundle.identityKey,
+        signedPreKey: bundle.signedPreKey,
+        preKeys: [] as any[],
+        pqIdentityKey: bundle.pqIdentityKey,
+        pqSignedPreKey: bundle.pqSignedPreKey,
+        pqPreKeys: [] as any[]
+      };
+
+      // Extract and pop exactly one prekey from the pool
+      if (bundle.preKeys && bundle.preKeys.length > 0) {
+        const poppedKey = bundle.preKeys.shift(); // Remove from server pool
+        yieldedBundle.preKeys = [poppedKey];
+        console.log(`[Keys] Consumed one-time prekey ${poppedKey.keyId} for ${targetUserId}. Remaining in server registry: ${bundle.preKeys.length}`);
+
+        // Proactively notify user Bob if his prekey pool is running low (below 20 keys)
+        if (bundle.preKeys.length < 20) {
+          console.log(`[Keys] User ${targetUserId} prekeys pool running low (${bundle.preKeys.length}). Dispatching replenish alert.`);
+          const targetSocketId = connectedUsers.get(targetUserId);
+          if (targetSocketId) {
+            io.to(targetSocketId).emit('replenish-keys', { remaining: bundle.preKeys.length });
+          }
+        }
+      }
+
+      // Pop one post-quantum prekey if available
+      if (bundle.pqPreKeys && bundle.pqPreKeys.length > 0) {
+        const poppedPqKey = bundle.pqPreKeys.shift();
+        yieldedBundle.pqPreKeys = [poppedPqKey];
+        console.log(`[Keys] Consumed one-time PQ prekey ${poppedPqKey.keyId} for ${targetUserId}. Remaining: ${bundle.pqPreKeys.length}`);
+      }
+      
+      if (ack) ack({ success: true, bundle: yieldedBundle });
     } else {
       if (ack) ack({ success: false, error: 'User not found or no keys registered' });
     }

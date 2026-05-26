@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { EventBus } from '../services/EventBus';
 
 export interface Commitment {
   id: string;
@@ -38,3 +39,9 @@ export const useCommitmentStore = create<CommitmentState>((set) => ({
     commitments: state.commitments.filter((c) => c.id !== id),
   })),
 }));
+
+// Global listener to capture AI detected tasks/commitments
+EventBus.on('ai.task-detected', (data: any) => {
+  console.log('useCommitmentStore: Auto-adding task:', data.task);
+  useCommitmentStore.getState().addCommitment(data.task, 'Today');
+});

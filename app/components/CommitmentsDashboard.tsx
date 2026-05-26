@@ -17,7 +17,7 @@ export const CommitmentsDashboard = () => {
     try {
       const embedding = await AiAdvisor.getEmbedding(searchQuery);
       if (embedding) {
-        const results = MemoryIndex.search(embedding);
+        const results = await MemoryIndex.search(embedding);
         setSearchResults(results);
       }
     } catch (e) {

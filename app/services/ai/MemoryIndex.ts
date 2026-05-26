@@ -1,4 +1,6 @@
-interface MemoryItem {
+import { saveMemory, getMemories, clearMemories } from '../storage/LocalDb';
+
+export interface MemoryItem {
   id: string;
   text: string;
   embedding: number[];
@@ -6,10 +8,9 @@ interface MemoryItem {
 }
 
 class MemoryIndexService {
-  private memories: MemoryItem[] = [];
-
   // Cosine similarity
   private similarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) return 0;
     let dotProduct = 0;
     let normA = 0;
     let normB = 0;
@@ -20,23 +21,20 @@ class MemoryIndexService {
       normB += b[i] * b[i];
     }
     
+    if (normA === 0 || normB === 0) return 0;
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
   }
 
-  addMemory(text: string, embedding: number[]) {
-    this.memories.push({
-      id: Date.now().toString() + Math.random().toString(),
-      text,
-      embedding,
-      timestamp: Date.now(),
-    });
-    console.log(`MemoryIndex: Added memory "${text.substring(0, 20)}..."`);
+  async addMemory(text: string, embedding: number[]): Promise<void> {
+    await saveMemory(text, embedding);
+    console.log(`MemoryIndex: Added persistent memory "${text.substring(0, 20)}..."`);
   }
 
-  search(queryEmbedding: number[], limit: number = 3): MemoryItem[] {
-    if (this.memories.length === 0) return [];
+  async search(queryEmbedding: number[], limit: number = 3): Promise<MemoryItem[]> {
+    const memories = await getMemories();
+    if (memories.length === 0) return [];
 
-    const scored = this.memories.map(item => ({
+    const scored = memories.map(item => ({
       item,
       score: this.similarity(queryEmbedding, item.embedding),
     }));
@@ -47,8 +45,9 @@ class MemoryIndexService {
     return scored.slice(0, limit).map(s => s.item);
   }
 
-  clear() {
-    this.memories = [];
+  async clear(): Promise<void> {
+    await clearMemories();
+    console.log('MemoryIndex: Cleared all persistent memories');
   }
 }
 

@@ -1,44 +1,59 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
+# Private Intelligence Messenger (PIM) .gitignore
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Expo / React Native
+.expo/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+web-build/
+metro-cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Virtual Environments
-venv/
-env/
-ENV/
+# Native Builds (Expo Prebuilds)
+ios/
+android/
+*.xcworkspace
+*.xcodeproj
+*.app
+*.ipa
+*.apk
+*.aab
+
+# EAS Local Builds / Credentials
+eas-cli-local.json
+credentials.json
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
+
+# Storage / AI Models (quantized weights)
+*.gguf
+*.onnx
+models/phi-3-mini.gguf
+app/models/phi-3-mini.gguf
+
+# Environment Variables & Secrets
 .env
-.venv
-env.bak/
-venv.bak/
+.env.local
+.env.*.local
 
-# Antigravity / IDE
-
+# IDE & Editor Configs
 .idea/
 .vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
 *.swp
+.DS_Store
 
-# Project specific
+# Logs and Diagnostics
 logs/
-data/
-.opencode/
-node_modules/
+*.log
+.antigravity/logs/
+artifacts/logs/

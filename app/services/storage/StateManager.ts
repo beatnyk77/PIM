@@ -50,11 +50,17 @@ export const useStore = create<AppState>((set, get) => ({
   },
   setActiveChat: (chatId) => set({ activeChat: chatId, activeGroup: null }),
   setActiveGroup: (groupId) => set({ activeGroup: groupId, activeChat: null }),
-  addMessage: (message) => {
+  addMessage: async (message) => {
       // Optimistically update UI
       set((state) => ({ messages: [...state.messages, message] }));
-      // Persist to DB
-      saveMessageToDb(message);
+      // Persist to DB and verify SQLite transaction integrity
+      const success = await saveMessageToDb(message);
+      if (!success) {
+          console.error(`StateManager: SQLite write transaction failed for message ${message.id}. Marking as failed.`);
+          set((state) => ({
+              messages: state.messages.map(m => m.id === message.id ? { ...m, status: 'failed' as any } : m)
+          }));
+      }
   },
   setMessages: (messages) => set({ messages }),
   updateMessageStatus: (messageId, status) => set((state) => ({
