@@ -22,6 +22,10 @@ const connectedUsers = new Map<string, string>();
 // Key Registry: userId -> KeyBundle
 const keyRegistry = new Map<string, any>();
 
+// Volatile registries for metadata defense
+const volatileKeyRegistry = new Map<string, any>();
+const tokenRoutingRegistry = new Map<string, string>();
+
 io.on('connection', (socket: Socket) => {
   const userId = socket.handshake.query.userId as string;
 
@@ -39,6 +43,12 @@ io.on('connection', (socket: Socket) => {
   socket.on('disconnect', () => {
     console.log(`[Disconnect] User disconnected: ${userId}`);
     connectedUsers.delete(userId);
+    // Clean up active anonymous routing tokens for this socket
+    for (const [token, socketId] of tokenRoutingRegistry.entries()) {
+      if (socketId === socket.id) {
+        tokenRoutingRegistry.delete(token);
+      }
+    }
   });
 
   // --- Key Management ---
@@ -171,8 +181,59 @@ io.on('connection', (socket: Socket) => {
           type,
           mediaUri,
           ciphertext,
-          messageId
+        });
+  });
+
+  // --- Anonymous Routing & Volatile Link Key Exchange ---
+
+  // 1. Subscribe to batch of 50 anonymous routing tokens
+  socket.on('subscribe-tokens-batch', (tokens: string[], ack: (res: any) => void) => {
+    console.log(`[Metadata Defense] Client ${userId} subscribing to batch of ${tokens.length} anonymous tokens.`);
+    tokens.forEach(tok => {
+      tokenRoutingRegistry.set(tok, socket.id);
+    });
+    if (ack) ack({ success: true });
+  });
+
+  // 2. Relay anonymous E2EE envelopes and instantly wipe/flush routing token mapping
+  socket.on('anonymous-relay', (data: any, ack: (res: any) => void) => {
+    const { destinationToken, ciphertext, type, mediaUri, messageId } = data;
+    if (tokenRoutingRegistry.has(destinationToken)) {
+      const targetSocketId = tokenRoutingRegistry.get(destinationToken);
+      io.to(targetSocketId!).emit('anonymous-receive', {
+        ciphertext,
+        type,
+        mediaUri,
+        messageId,
+        destinationToken
       });
+      // Flush token instantly to deny passive sizing/timing mappings
+      tokenRoutingRegistry.delete(destinationToken);
+      console.log(`[Metadata Defense] Securely relayed anonymous packet and flushed token: ${destinationToken.substring(0, 8)}...`);
+      if (ack) ack({ success: true });
+    } else {
+      if (ack) ack({ success: false, error: 'Token offline or already consumed' });
+    }
+  });
+
+  // 3. Register Volatile Bundle indexed by fetch token
+  socket.on('register-volatile-bundle', (data: any, ack: (res: any) => void) => {
+    const { linkToken, bundle } = data;
+    volatileKeyRegistry.set(linkToken, bundle);
+    console.log(`[Metadata Defense] Volatile bundle registered for one-time fetch link: ${linkToken.substring(0, 8)}...`);
+    if (ack) ack({ success: true });
+  });
+
+  // 4. Fetch Volatile Bundle and instantly wipe/purge registry entry
+  socket.on('fetch-volatile-bundle', (linkToken: string, ack: (res: any) => void) => {
+    const bundle = volatileKeyRegistry.get(linkToken);
+    if (bundle) {
+      if (ack) ack({ success: true, bundle });
+      volatileKeyRegistry.delete(linkToken);
+      console.log(`[Metadata Defense] Volatile bundle delivered and permanently deleted for token: ${linkToken.substring(0, 8)}...`);
+    } else {
+      if (ack) ack({ success: false, error: 'Volatile link expired or already fetched.' });
+    }
   });
 
 });

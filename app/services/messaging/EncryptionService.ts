@@ -28,6 +28,28 @@ function decryptSymmetric(ciphertext: string, hexKey: string, ivHex: string): st
   return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
+export function padPlaintext(text: string): string {
+  const len = text.length;
+  const buckets = [256, 1024, 4096];
+  const possibleBuckets = buckets.filter(b => b >= len + 1);
+  let targetSize = 4096;
+  if (possibleBuckets.length > 0) {
+    const idx = Math.floor(Math.random() * possibleBuckets.length);
+    targetSize = possibleBuckets[idx];
+  } else {
+    targetSize = Math.ceil((len + 1) / 1024) * 1024;
+  }
+  const paddingLength = targetSize - len - 1;
+  const dummyPadding = CryptoJS.lib.WordArray.random(paddingLength).toString(CryptoJS.enc.Hex).substring(0, paddingLength);
+  return text + '\0' + dummyPadding;
+}
+
+export function stripPadding(paddedText: string): string {
+  const delimiterIndex = paddedText.indexOf('\0');
+  if (delimiterIndex === -1) return paddedText;
+  return paddedText.substring(0, delimiterIndex);
+}
+
 // --- Standard HKDF-SHA256 Implementation using CryptoJS ---
 function hkdfSha256(ikm: CryptoJS.lib.WordArray, salt: CryptoJS.lib.WordArray, info: string, length: number): string {
   let localSalt = salt;
@@ -377,7 +399,8 @@ class EncryptionServiceClass {
       console.log(`EncryptionService: Encrypting hybrid message for ${remoteUserId}...`);
       
       // 1. Classical encryption
-      const classicCiphertext = await this.encryptMessage(remoteUserId, message);
+      const paddedMessage = padPlaintext(message);
+      const classicCiphertext = await this.encryptMessage(remoteUserId, paddedMessage);
       if (!classicCiphertext) return null;
 
       // 2. Load or establish post-quantum keys
@@ -556,7 +579,8 @@ class EncryptionServiceClass {
         ctEphemeral: envelope.ct_ephemeral ? 'Present' : 'Absent',
         handshakeSpk: envelope.ctSpk ? 'Present' : 'Absent',
       });
-      return this.decryptMessage(remoteUserId, parsedClassic);
+      const decryptedPadded = await this.decryptMessage(remoteUserId, parsedClassic);
+      return decryptedPadded ? stripPadding(decryptedPadded) : null;
     } catch (e) {
       console.error('EncryptionService: Failed hybrid decryption', e);
       return null;
@@ -693,7 +717,8 @@ class EncryptionServiceClass {
     await saveGroupSenderKeyToDb(groupId, myId, nextSenderKey);
 
     const iv = CryptoJS.lib.WordArray.random(16);
-    const encrypted = CryptoJS.AES.encrypt(message, CryptoJS.enc.Hex.parse(K_msg), {
+    const padded = padPlaintext(message);
+    const encrypted = CryptoJS.AES.encrypt(padded, CryptoJS.enc.Hex.parse(K_msg), {
       iv: iv,
       mode: CryptoJS.mode.CBC,
       padding: CryptoJS.pad.Pkcs7
@@ -739,10 +764,11 @@ class EncryptionServiceClass {
         mode: CryptoJS.mode.CBC,
         padding: CryptoJS.pad.Pkcs7
       });
-      const plaintext = decrypted.toString(CryptoJS.enc.Utf8);
-      if (!plaintext) {
+      const padded = decrypted.toString(CryptoJS.enc.Utf8);
+      if (!padded) {
         throw new Error("Plaintext decryption resulted in empty string");
       }
+      const plaintext = stripPadding(padded);
 
       await saveGroupSenderKeyToDb(groupId, senderId, nextSenderKey);
 

@@ -1,34 +1,40 @@
 import { io, Socket } from 'socket.io-client';
-import { database, QueuedMessage, saveMessageToDb, getSignalStoreValue, saveSignalStoreValue, saveGroupSenderKeyToDb } from '../storage/LocalDb';
+import { 
+  database, 
+  QueuedMessage, 
+  saveMessageToDb, 
+  getSignalStoreValue, 
+  saveSignalStoreValue, 
+  saveGroupSenderKeyToDb 
+} from '../storage/LocalDb';
 import { EncryptionService } from './EncryptionService';
 import { EventBus } from '../EventBus';
 import { useStore } from '../storage/StateManager';
 import { IdentityService } from '../auth/IdentityService';
+import CryptoJS from 'crypto-js';
 
 class MessageRelayService {
   private socket: Socket | null = null;
-  // Placeholder URL - will need to be updated with actual backend URL
-  // For Android Emulator use 'http://10.0.2.2:3000'
-  // For iOS Simulator use 'http://localhost:3000'
   private serverUrl: string = 'http://localhost:3000'; 
+  private dummyInterval: any = null;
 
   connect(userId: string) {
     if (this.socket?.connected) return;
 
-    console.log('MessageRelay: Connecting to', this.serverUrl);
+    console.log('MessageRelay: Connecting anonymously to', this.serverUrl);
 
     this.socket = io(this.serverUrl, {
       query: { userId },
       transports: ['websocket'],
       autoConnect: true,
       reconnection: true,
-      reconnectionAttempts: Infinity, // Infinite reconnect attempts to guarantee offline-first recovery
-      reconnectionDelay: 1000,        // Start backoff at 1 second
-      reconnectionDelayMax: 30000,    // Caps max reconnection interval at 30 seconds to optimize battery
-      randomizationFactor: 0.5,       // 50% random jitter to mitigate thundering herd spikes on relay boot
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 30000,
+      randomizationFactor: 0.5,
     });
 
-    this.socket.on('connect', () => {
+    this.socket.on('connect', async () => {
       console.log('MessageRelay: Connected:', this.socket?.id);
       EventBus.emit('network.connected');
       this.processOfflineQueue();
@@ -38,6 +44,12 @@ class MessageRelayService {
 
       // Auto-register public E2EE key bundle
       this.registerKeys();
+
+      // Subscribe to active pre-shared inbound tokens on backend for metadata masking
+      await this.subscribeInboundTokens();
+
+      // Start periodic randomized dummy packets background stream
+      this.startDummyPacketNoise();
 
       // Listen for E2EE keys replenishment requests
       this.socket!.on('replenish-keys', async (data: any) => {
@@ -49,6 +61,10 @@ class MessageRelayService {
     this.socket.on('disconnect', () => {
       console.log('MessageRelay: Disconnected');
       EventBus.emit('network.disconnected');
+      if (this.dummyInterval) {
+        clearInterval(this.dummyInterval);
+        this.dummyInterval = null;
+      }
     });
 
     this.socket.on('message', (data: any) => {
@@ -56,7 +72,132 @@ class MessageRelayService {
       EventBus.emit('message.received', data);
     });
 
-    // Listen for encrypted chat messages
+    // Listen for anonymous token-routed envelopes
+    this.socket.on('anonymous-receive', async (data: any) => {
+      console.log('MessageRelay: Received anonymous token-routed envelope via token:', data.destinationToken);
+      
+      try {
+        const senderId = await this.resolveTokenOwner(data.destinationToken) || 'user2';
+        
+        // Remove this consumed token from our inbound local list
+        const currentInbound = await this.getInboundTokens(senderId);
+        await this.saveInboundTokens(senderId, currentInbound.filter(t => t !== data.destinationToken));
+
+        const decryptedContent = await EncryptionService.decryptHybridMessage(senderId, data.ciphertext);
+        if (!decryptedContent) {
+          console.warn('MessageRelay: Failed to decrypt anonymous message');
+          return;
+        }
+
+        console.log('MessageRelay: Anonymous message decrypted successfully');
+
+        // Intercept token handshakes, responses, and replenishments
+        try {
+          const parsed = JSON.parse(decryptedContent);
+          
+          if (parsed && parsed.type === 'token-handshake') {
+            console.log(`MessageRelay: Processing bootstrap token-handshake from ${senderId}`);
+            await this.saveOutboundTokens(senderId, parsed.tokens);
+            
+            // Generate and reply with our inbound token batch to complete anonymous channel bootstrap
+            const myInboundTokens: string[] = [];
+            for (let i = 0; i < 50; i++) {
+              myInboundTokens.push(CryptoJS.lib.WordArray.random(32).toString(CryptoJS.enc.Hex));
+            }
+            await this.saveInboundTokens(senderId, myInboundTokens);
+            this.socket?.emit('subscribe-tokens-batch', myInboundTokens);
+
+            const handshakeResponse = JSON.stringify({
+              type: 'token-handshake-response',
+              tokens: myInboundTokens
+            });
+            await this.sendSecureMessage(senderId, handshakeResponse);
+            
+            if (parsed.text) {
+              EventBus.emit('message.secure-received', {
+                from: senderId,
+                content: parsed.text,
+                timestamp: data.timestamp || Date.now(),
+                messageId: data.messageId
+              });
+              await saveMessageToDb({
+                  id: data.messageId || Date.now().toString(),
+                  content: parsed.text,
+                  senderId: senderId,
+                  timestamp: data.timestamp || Date.now(),
+                  isMe: false,
+                  status: 'read'
+              });
+            }
+            return;
+          }
+
+          if (parsed && parsed.type === 'token-handshake-response') {
+            console.log(`MessageRelay: Received token-handshake-response from ${senderId}. Outbound batch mapped.`);
+            await this.saveOutboundTokens(senderId, parsed.tokens);
+            return;
+          }
+
+          if (parsed && parsed.type === 'token-replenishment') {
+            console.log(`MessageRelay: Appending replenished outbound token batch from ${senderId}`);
+            const currentOutbound = await this.getOutboundTokens(senderId);
+            await this.saveOutboundTokens(senderId, [...currentOutbound, ...parsed.tokens]);
+            return;
+          }
+
+          if (parsed && parsed.type === 'group-key-distribution') {
+            console.log(`MessageRelay: Received group-key-distribution for group ${parsed.groupId} from ${senderId}`);
+            await saveGroupSenderKeyToDb(parsed.groupId, senderId, parsed.senderKey);
+            return;
+          }
+        } catch (e) {
+          // Normal message text
+        }
+
+        let textContent = decryptedContent;
+        let mediaUriDecrypted = data.mediaUri;
+        let isMedia = false;
+
+        try {
+          const parsed = JSON.parse(decryptedContent);
+          if (parsed && parsed.type === 'media') {
+            textContent = parsed.text || '';
+            isMedia = true;
+            if (parsed.encryptedMediaUri && parsed.mediaKey && parsed.mediaIv) {
+              const localDecryptedPath = await EncryptionService.decryptMedia(parsed.encryptedMediaUri, parsed.mediaKey, parsed.mediaIv);
+              mediaUriDecrypted = localDecryptedPath;
+            }
+          }
+        } catch (e) {
+          // Normal text
+        }
+
+        EventBus.emit('message.secure-received', {
+          from: senderId,
+          content: textContent,
+          timestamp: Date.now(),
+          messageId: data.messageId,
+          type: data.type || (isMedia ? 'image' : 'text'),
+          mediaUri: mediaUriDecrypted
+        });
+
+        await saveMessageToDb({
+            id: data.messageId || Date.now().toString(),
+            content: textContent,
+            senderId: senderId,
+            timestamp: Date.now(),
+            isMe: false,
+            status: 'read',
+            type: data.type || (isMedia ? 'image' : 'text'),
+            mediaUri: mediaUriDecrypted
+        });
+
+      } catch (err) {
+        console.error('MessageRelay: Error handling anonymous-receive', err);
+      }
+    });
+
+    // Listen for classical encrypted chat messages
     this.socket.on('chat-message', async (data: any) => {
       console.log('MessageRelay: Received encrypted message from', data.from);
       
@@ -66,16 +207,73 @@ class MessageRelayService {
         if (decryptedContent) {
           console.log('MessageRelay: Message decrypted successfully');
 
-          // Intercept group-key-distribution
+          // Intercept bootstrap token handshakes and group keys
           try {
             const parsed = JSON.parse(decryptedContent);
+            
+            if (parsed && parsed.type === 'token-handshake') {
+              console.log(`MessageRelay: Processing bootstrap token-handshake from ${data.from}`);
+              await this.saveOutboundTokens(data.from, parsed.tokens);
+
+              const myInboundTokens: string[] = [];
+              for (let i = 0; i < 50; i++) {
+                myInboundTokens.push(CryptoJS.lib.WordArray.random(32).toString(CryptoJS.enc.Hex));
+              }
+              await this.saveInboundTokens(data.from, myInboundTokens);
+              this.socket?.emit('subscribe-tokens-batch', myInboundTokens);
+
+              const handshakeResponse = JSON.stringify({
+                type: 'token-handshake-response',
+                tokens: myInboundTokens
+              });
+              await this.sendSecureMessage(data.from, handshakeResponse);
+
+              let mediaUriDecrypted = data.mediaUri;
+              let isMedia = false;
+              if (parsed.mediaDetails) {
+                isMedia = true;
+                const details = parsed.mediaDetails;
+                if (details.encryptedMediaUri && details.mediaKey && details.mediaIv) {
+                  const localDecryptedPath = await EncryptionService.decryptMedia(details.encryptedMediaUri, details.mediaKey, details.mediaIv);
+                  mediaUriDecrypted = localDecryptedPath;
+                }
+              }
+
+              EventBus.emit('message.secure-received', {
+                from: data.from,
+                content: parsed.text || '',
+                timestamp: data.timestamp || Date.now(),
+                messageId: data.messageId,
+                type: data.type || (isMedia ? 'image' : 'text'),
+                mediaUri: mediaUriDecrypted
+              });
+
+              await saveMessageToDb({
+                  id: data.messageId,
+                  content: parsed.text || '',
+                  senderId: data.from,
+                  timestamp: data.timestamp || Date.now(),
+                  isMe: false,
+                  status: 'read',
+                  type: data.type || (isMedia ? 'image' : 'text'),
+                  mediaUri: mediaUriDecrypted
+              });
+              return;
+            }
+
+            if (parsed && parsed.type === 'token-handshake-response') {
+              console.log(`MessageRelay: Received token-handshake-response from ${data.from}. Outbound batch mapped.`);
+              await this.saveOutboundTokens(data.from, parsed.tokens);
+              return;
+            }
+
             if (parsed && parsed.type === 'group-key-distribution') {
               console.log(`MessageRelay: Received group-key-distribution for group ${parsed.groupId} from ${data.from}`);
               await saveGroupSenderKeyToDb(parsed.groupId, data.from, parsed.senderKey);
               return;
             }
           } catch (e) {
-            // Not a JSON payload, process normally
+            // Normal message
           }
 
           let textContent = decryptedContent;
@@ -93,7 +291,7 @@ class MessageRelayService {
               }
             }
           } catch (e) {
-            // Not media payload
+            // Normal message
           }
 
           EventBus.emit('message.secure-received', {
@@ -187,7 +385,6 @@ class MessageRelayService {
               console.warn('MessageRelay: Failed to decrypt group message from', data.from);
             }
           } else {
-            // Fallback for unencrypted/legacy group messages
             EventBus.emit('message.group-received', data);
           }
         } catch (err) {
@@ -197,6 +394,128 @@ class MessageRelayService {
 
     this.socket.on('connect_error', (err) => {
       console.log('MessageRelay: Connection Error:', err.message);
+    });
+  }
+
+  // --- Ephemeral Token Management & Batches ---
+  async getInboundTokens(remoteUserId: string): Promise<string[]> {
+    const raw = await getSignalStoreValue(`tokens_inbound:${remoteUserId}`);
+    return raw ? JSON.parse(raw) : [];
+  }
+
+  async saveInboundTokens(remoteUserId: string, tokens: string[]): Promise<void> {
+    await saveSignalStoreValue(`tokens_inbound:${remoteUserId}`, JSON.stringify(tokens));
+    for (const tok of tokens) {
+      await saveSignalStoreValue(`token_owner:${tok}`, remoteUserId);
+    }
+  }
+
+  async getOutboundTokens(remoteUserId: string): Promise<string[]> {
+    const raw = await getSignalStoreValue(`tokens_outbound:${remoteUserId}`);
+    return raw ? JSON.parse(raw) : [];
+  }
+
+  async saveOutboundTokens(remoteUserId: string, tokens: string[]): Promise<void> {
+    await saveSignalStoreValue(`tokens_outbound:${remoteUserId}`, JSON.stringify(tokens));
+  }
+
+  async resolveTokenOwner(token: string): Promise<string | undefined> {
+    return await getSignalStoreValue(`token_owner:${token}`);
+  }
+
+  async subscribeInboundTokens() {
+    if (!this.socket?.connected) return;
+    const user2Tokens = await this.getInboundTokens('user2');
+    if (user2Tokens.length > 0) {
+      console.log(`MessageRelay: Subscribing to ${user2Tokens.length} inbound tokens for user2.`);
+      this.socket.emit('subscribe-tokens-batch', user2Tokens);
+    }
+  }
+
+  async generateAndSendTokenReplenishment(remoteUserId: string): Promise<void> {
+    console.log(`MessageRelay: Automatically replenishing token batch for ${remoteUserId}...`);
+    const newTokens: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      newTokens.push(CryptoJS.lib.WordArray.random(32).toString(CryptoJS.enc.Hex));
+    }
+    
+    const currentInbound = await this.getInboundTokens(remoteUserId);
+    const updatedInbound = [...currentInbound, ...newTokens];
+    await this.saveInboundTokens(remoteUserId, updatedInbound);
+
+    if (this.socket?.connected) {
+      this.socket.emit('subscribe-tokens-batch', newTokens);
+    }
+
+    const payload = JSON.stringify({
+      type: 'token-replenishment',
+      senderId: 'me',
+      tokens: newTokens
+    });
+    
+    await this.sendSecureMessage(remoteUserId, payload);
+  }
+
+  // --- Background Dummy Packet Stream ---
+  startDummyPacketNoise() {
+    if (this.dummyInterval) clearInterval(this.dummyInterval);
+    
+    this.dummyInterval = setInterval(() => {
+      if (this.socket?.connected) {
+        const dummyEnvelope = {
+          version: 'v2_hybrid_kem',
+          type: 'dummy',
+          ciphertext_pq: CryptoJS.lib.WordArray.random(128).toString(CryptoJS.enc.Base64),
+          nonce: CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex)
+        };
+        setTimeout(() => {
+          if (this.socket?.connected) {
+            this.socket.emit('anonymous-relay', {
+              destinationToken: CryptoJS.lib.WordArray.random(32).toString(CryptoJS.enc.Hex),
+              ciphertext: dummyEnvelope
+            });
+          }
+        }, Math.random() * 200 + 50);
+      }
+    }, 25000);
+  }
+
+  // --- Volatile Key Bundle links ---
+  registerVolatileKeys(linkToken: string, bundle: any): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (!this.socket?.connected) {
+        console.warn('MessageRelay: Socket not connected. Cannot register volatile keys.');
+        resolve(false);
+        return;
+      }
+      this.socket.emit('register-volatile-bundle', { linkToken, bundle }, (res: any) => {
+        if (res && res.success) {
+          console.log(`MessageRelay: Volatile prekeys registered successfully: ${linkToken}`);
+          resolve(true);
+        } else {
+          console.error('MessageRelay: Volatile prekey registration failed:', res?.error);
+          resolve(false);
+        }
+      });
+    });
+  }
+
+  fetchVolatileKeys(linkToken: string): Promise<any | null> {
+    return new Promise((resolve) => {
+      if (!this.socket?.connected) {
+        console.warn('MessageRelay: Socket not connected. Cannot fetch volatile prekeys.');
+        resolve(null);
+        return;
+      }
+      this.socket.emit('fetch-volatile-bundle', linkToken, (res: any) => {
+        if (res && res.success && res.bundle) {
+          console.log(`MessageRelay: Volatile prekeys fetched successfully: ${linkToken}`);
+          resolve(res.bundle);
+        } else {
+          console.error('MessageRelay: Volatile prekey fetch failed:', res?.error);
+          resolve(null);
+        }
+      });
     });
   }
 
@@ -242,7 +561,7 @@ class MessageRelayService {
     }
 
     console.log('MessageRelay: Generating a fresh E2EE prekey bundle...');
-    const bundle = await IdentityService.generatePreKeyBundle(keys, true); // forceRegenerate = true
+    const bundle = await IdentityService.generatePreKeyBundle(keys, true);
     if (!bundle) {
       console.error('MessageRelay: Failed to replenish prekey bundle.');
       return;
@@ -279,6 +598,10 @@ class MessageRelayService {
   }
 
   disconnect() {
+    if (this.dummyInterval) {
+      clearInterval(this.dummyInterval);
+      this.dummyInterval = null;
+    }
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
@@ -293,8 +616,6 @@ class MessageRelayService {
 
   async sendGroupMessage(groupId: string, content: string, type: string = 'text', mediaUri?: string) {
     try {
-      // 1. Distribute key to other group participants if not done
-      // For MVP/test-group, the remote participant is 'user2'
       const participants = ['user2'];
       const mySenderKey = await EncryptionService.getOrGenerateGroupSenderKey(groupId);
 
@@ -312,7 +633,6 @@ class MessageRelayService {
         }
       }
 
-      // 2. Encrypt the group message payload using our group sender key
       let encryptedPayload: any;
       if (type === 'image' || type === 'audio') {
         if (mediaUri) {
@@ -379,25 +699,76 @@ class MessageRelayService {
         }
       }
 
-      console.log(`MessageRelay: Encrypting message for ${toUserId}...`);
-      const ciphertext = await EncryptionService.encryptHybridMessage(toUserId, content);
-      
-      if (!ciphertext) {
-        throw new Error('Encryption failed');
-      }
-
+      const outboundTokens = await this.getOutboundTokens(toUserId);
       const messageId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
 
-      const payload = {
-        to: toUserId,
-        ciphertext,
-        timestamp: Date.now(),
-        messageId,
-      };
+      if (outboundTokens.length > 0) {
+        const nextToken = outboundTokens.shift()!;
+        await this.saveOutboundTokens(toUserId, outboundTokens);
 
-      await this.sendMessage('chat-message', payload);
-      console.log('MessageRelay: Secure hybrid message sent (or queued)');
-      return messageId;
+        console.log(`MessageRelay: Securely routing message anonymously via token: ${nextToken.substring(0, 8)}...`);
+        
+        if (outboundTokens.length < 10) {
+          setTimeout(() => this.generateAndSendTokenReplenishment(toUserId), 100);
+        }
+
+        const ciphertext = await EncryptionService.encryptHybridMessage(toUserId, content);
+        if (!ciphertext) throw new Error('Encryption failed');
+
+        // Traffic Shaping: 50-250ms delayed anonymous relay dispatch
+        setTimeout(() => {
+          if (this.socket?.connected) {
+            this.socket.emit('anonymous-relay', {
+              destinationToken: nextToken,
+              ciphertext,
+              messageId
+            });
+            console.log('[Shaping] Anonymous padded E2EE packet dispatched.');
+          }
+        }, Math.random() * 200 + 50);
+
+        return messageId;
+
+      } else {
+        console.log('MessageRelay: No pre-shared tokens yet. Bootstrapping anonymous tokens batch...');
+        
+        const myInboundTokens: string[] = [];
+        for (let i = 0; i < 50; i++) {
+          myInboundTokens.push(CryptoJS.lib.WordArray.random(32).toString(CryptoJS.enc.Hex));
+        }
+        await this.saveInboundTokens(toUserId, myInboundTokens);
+        
+        if (this.socket?.connected) {
+          this.socket.emit('subscribe-tokens-batch', myInboundTokens);
+        }
+
+        const bootstrappedPayload = JSON.stringify({
+          type: 'token-handshake',
+          tokens: myInboundTokens,
+          text: content
+        });
+
+        console.log(`MessageRelay: Encrypting bootstrap hybrid message for ${toUserId}...`);
+        const ciphertext = await EncryptionService.encryptHybridMessage(toUserId, bootstrappedPayload);
+        if (!ciphertext) throw new Error('Encryption failed');
+
+        const payload = {
+          to: toUserId,
+          ciphertext,
+          timestamp: Date.now(),
+          messageId,
+        };
+
+        // Dispatch via classical handshake wrapper with shaped delay
+        setTimeout(() => {
+          if (this.socket?.connected) {
+            this.socket.emit('chat-message', payload);
+            console.log('[Shaping] Bootstrap classic E2EE packet dispatched.');
+          }
+        }, Math.random() * 200 + 50);
+
+        return messageId;
+      }
     } catch (e) {
       console.error('MessageRelay: Failed to send secure message', e);
       return null;
@@ -436,26 +807,80 @@ class MessageRelayService {
         mediaIv: mediaEncResult.iv
       });
 
-      console.log(`MessageRelay: Encrypting E2EE hybrid envelope for ${toUserId}...`);
-      const ciphertext = await EncryptionService.encryptHybridMessage(toUserId, mediaPayload);
-      if (!ciphertext) {
-        throw new Error('Encryption failed');
-      }
-
+      const outboundTokens = await this.getOutboundTokens(toUserId);
       const messageId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
 
-      const payload = {
-        to: toUserId,
-        ciphertext,
-        timestamp: Date.now(),
-        messageId,
-        type,
-        mediaUri
-      };
+      if (outboundTokens.length > 0) {
+        const nextToken = outboundTokens.shift()!;
+        await this.saveOutboundTokens(toUserId, outboundTokens);
 
-      await this.sendMessage('chat-message', payload);
-      console.log('MessageRelay: Secure hybrid media message sent successfully');
-      return messageId;
+        if (outboundTokens.length < 10) {
+          setTimeout(() => this.generateAndSendTokenReplenishment(toUserId), 100);
+        }
+
+        console.log(`MessageRelay: Encrypting E2EE hybrid envelope for anonymous token: ${nextToken.substring(0, 8)}...`);
+        const ciphertext = await EncryptionService.encryptHybridMessage(toUserId, mediaPayload);
+        if (!ciphertext) throw new Error('Encryption failed');
+
+        setTimeout(() => {
+          if (this.socket?.connected) {
+            this.socket.emit('anonymous-relay', {
+              destinationToken: nextToken,
+              ciphertext,
+              type,
+              mediaUri,
+              messageId
+            });
+            console.log('[Shaping] Anonymous media padded packet dispatched.');
+          }
+        }, Math.random() * 200 + 50);
+
+        return messageId;
+      } else {
+        console.log('MessageRelay: Bootstrapping anonymous tokens batch for media channel...');
+        const myInboundTokens: string[] = [];
+        for (let i = 0; i < 50; i++) {
+          myInboundTokens.push(CryptoJS.lib.WordArray.random(32).toString(CryptoJS.enc.Hex));
+        }
+        await this.saveInboundTokens(toUserId, myInboundTokens);
+        
+        if (this.socket?.connected) {
+          this.socket.emit('subscribe-tokens-batch', myInboundTokens);
+        }
+
+        const bootstrappedMediaPayload = JSON.stringify({
+          type: 'token-handshake',
+          tokens: myInboundTokens,
+          text: content,
+          mediaDetails: {
+            encryptedMediaUri: mediaEncResult.encryptedUri,
+            mediaKey: mediaEncResult.key,
+            mediaIv: mediaEncResult.iv
+          }
+        });
+
+        console.log(`MessageRelay: Encrypting bootstrap media hybrid message for ${toUserId}...`);
+        const ciphertext = await EncryptionService.encryptHybridMessage(toUserId, bootstrappedMediaPayload);
+        if (!ciphertext) throw new Error('Encryption failed');
+
+        const payload = {
+          to: toUserId,
+          ciphertext,
+          timestamp: Date.now(),
+          messageId,
+          type,
+          mediaUri
+        };
+
+        setTimeout(() => {
+          if (this.socket?.connected) {
+            this.socket.emit('chat-message', payload);
+            console.log('[Shaping] Bootstrap classic E2EE media packet dispatched.');
+          }
+        }, Math.random() * 200 + 50);
+
+        return messageId;
+      }
     } catch (e) {
       console.error('MessageRelay: Failed to send secure message with media', e);
       return null;
@@ -464,7 +889,12 @@ class MessageRelayService {
 
   async sendMessage(event: string, data: any) {
     if (this.socket?.connected) {
-      this.socket.emit(event, data);
+      // Direct emit for system events, shaping delay
+      setTimeout(() => {
+        if (this.socket?.connected) {
+          this.socket.emit(event, data);
+        }
+      }, Math.random() * 200 + 50);
     } else {
       console.log('MessageRelay: Offline. Queuing message...');
       try {
@@ -490,15 +920,13 @@ class MessageRelayService {
 
       console.log(`MessageRelay: Processing ${queuedMessages.length} queued messages...`);
 
-      // Process strictly in order
-      // Note: In a real app, we might want to batch this or handle failures more robustly
       for (const msg of queuedMessages) {
         if (this.socket?.connected) {
           try {
              const data = JSON.parse(msg.data);
+             // Directly emit offline flushes
              this.socket.emit(msg.event, data);
              
-             // Remove from DB after sending
              await database.write(async () => {
                await msg.destroyPermanently();
              });
