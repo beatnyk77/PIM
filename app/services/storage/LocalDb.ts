@@ -94,6 +94,14 @@ export const mySchema = appSchema({
         { name: 'created_at', type: 'number' },
       ],
     }),
+    tableSchema({
+      name: 'group_sender_keys',
+      columns: [
+        { name: 'group_id', type: 'string', isIndexed: true },
+        { name: 'sender_id', type: 'string', isIndexed: true },
+        { name: 'sender_key', type: 'string' },
+      ],
+    }),
   ],
 });
 
@@ -171,6 +179,22 @@ export class MemoryEntry extends Model {
   }
 }
 
+export class GroupSenderKeyEntry extends Model {
+  static table = 'group_sender_keys';
+
+  @text('group_id') groupId!: string;
+  @text('sender_id') senderId!: string;
+  @text('sender_key') _senderKey!: string;
+
+  get senderKey() {
+    return decryptData(this._senderKey);
+  }
+
+  set senderKey(value: string) {
+    this._senderKey = encryptData(value);
+  }
+}
+
 // 3. Create Adapter
 const adapter = new SQLiteAdapter({
   schema: mySchema,
@@ -190,6 +214,7 @@ export const database = new Database({
     QueuedMessage,
     SignalStoreEntry,
     MemoryEntry,
+    GroupSenderKeyEntry,
   ],
 });
 
@@ -351,5 +376,64 @@ export const clearMemories = async (): Promise<void> => {
         });
     } catch (e) {
         console.error('Error clearing memories:', e);
+    }
+};
+
+export const deleteMessageFromDb = async (messageId: string): Promise<boolean> => {
+    try {
+        const collection = database.get<Message>('messages');
+        const existing = await collection.query(Q.where('message_id', messageId)).fetch();
+        if (existing.length > 0) {
+            await database.write(async () => {
+                await existing[0].destroyPermanently();
+            });
+            console.log(`LocalDb: Physically purged message ${messageId} from database.`);
+            return true;
+        }
+        return false;
+    } catch (e) {
+        console.error(`Error deleting message ${messageId} from DB:`, e);
+        return false;
+    }
+};
+
+export const getGroupSenderKeyFromDb = async (groupId: string, senderId: string): Promise<string | undefined> => {
+    try {
+        const collection = database.get<GroupSenderKeyEntry>('group_sender_keys');
+        const results = await collection.query(
+            Q.and(Q.where('group_id', groupId), Q.where('sender_id', senderId))
+        ).fetch();
+        if (results.length > 0) {
+            return results[0].senderKey;
+        }
+    } catch (e) {
+        console.error('Error fetching group sender key:', e);
+    }
+    return undefined;
+};
+
+export const saveGroupSenderKeyToDb = async (groupId: string, senderId: string, senderKey: string): Promise<void> => {
+    try {
+        const collection = database.get<GroupSenderKeyEntry>('group_sender_keys');
+        const existing = await collection.query(
+            Q.and(Q.where('group_id', groupId), Q.where('sender_id', senderId))
+        ).fetch();
+        
+        await database.write(async () => {
+            if (existing.length > 0) {
+                await existing[0].update(entry => {
+                    entry.senderKey = senderKey;
+                });
+            } else {
+                await collection.create(entry => {
+                    entry.groupId = groupId;
+                    entry.senderId = senderId;
+                    entry.senderKey = senderKey;
+                });
+            }
+        });
+        console.log(`LocalDb: Saved group sender key for ${senderId} in group ${groupId}`);
+    } catch (e) {
+        console.error('Error saving group sender key:', e);
     }
 };

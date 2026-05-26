@@ -158,8 +158,8 @@ io.on('connection', (socket: Socket) => {
 
   // Group Message
   socket.on('group-message', (data: any) => {
-      // { groupId, content (plaintext for now or encrypted shared key), timestamp }
-      const { groupId, content, timestamp, type, mediaUri } = data;
+      // { groupId, content, timestamp, type, mediaUri, ciphertext, messageId } = data;
+      const { groupId, content, timestamp, type, mediaUri, ciphertext, messageId } = data;
       console.log(`[Groups] Message in ${groupId} from ${userId}`);
       
       // Broadcast to room excluding sender
@@ -169,7 +169,9 @@ io.on('connection', (socket: Socket) => {
           content,
           timestamp,
           type,
-          mediaUri
+          mediaUri,
+          ciphertext,
+          messageId
       });
   });
 

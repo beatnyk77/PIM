@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getMessages, saveMessageToDb } from './LocalDb';
+import { getMessages, saveMessageToDb, deleteMessageFromDb } from './LocalDb';
 
 export interface ChatMessage {
   id: string;
@@ -69,9 +69,12 @@ export const useStore = create<AppState>((set, get) => ({
   updateSettings: (newSettings) => set((state) => ({
     settings: { ...state.settings, ...newSettings }
   })),
-  deleteMessage: (messageId) => set((state) => ({
-    messages: state.messages.filter(m => m.id !== messageId)
-  })),
+  deleteMessage: async (messageId) => {
+    set((state) => ({
+      messages: state.messages.filter(m => m.id !== messageId)
+    }));
+    await deleteMessageFromDb(messageId);
+  },
   hydrate: async () => {
       const messages = await getMessages();
       set({ messages });

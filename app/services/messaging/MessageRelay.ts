@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { database, QueuedMessage, saveMessageToDb } from '../storage/LocalDb';
+import { database, QueuedMessage, saveMessageToDb, getSignalStoreValue, saveSignalStoreValue, saveGroupSenderKeyToDb } from '../storage/LocalDb';
 import { EncryptionService } from './EncryptionService';
 import { EventBus } from '../EventBus';
 import { useStore } from '../storage/StateManager';
@@ -65,11 +65,44 @@ class MessageRelayService {
         
         if (decryptedContent) {
           console.log('MessageRelay: Message decrypted successfully');
+
+          // Intercept group-key-distribution
+          try {
+            const parsed = JSON.parse(decryptedContent);
+            if (parsed && parsed.type === 'group-key-distribution') {
+              console.log(`MessageRelay: Received group-key-distribution for group ${parsed.groupId} from ${data.from}`);
+              await saveGroupSenderKeyToDb(parsed.groupId, data.from, parsed.senderKey);
+              return;
+            }
+          } catch (e) {
+            // Not a JSON payload, process normally
+          }
+
+          let textContent = decryptedContent;
+          let mediaUriDecrypted = data.mediaUri;
+          let isMedia = false;
+
+          try {
+            const parsed = JSON.parse(decryptedContent);
+            if (parsed && parsed.type === 'media') {
+              textContent = parsed.text || '';
+              isMedia = true;
+              if (parsed.encryptedMediaUri && parsed.mediaKey && parsed.mediaIv) {
+                const localDecryptedPath = await EncryptionService.decryptMedia(parsed.encryptedMediaUri, parsed.mediaKey, parsed.mediaIv);
+                mediaUriDecrypted = localDecryptedPath;
+              }
+            }
+          } catch (e) {
+            // Not media payload
+          }
+
           EventBus.emit('message.secure-received', {
             from: data.from,
-            content: decryptedContent,
+            content: textContent,
             timestamp: data.timestamp || Date.now(),
-            messageId: data.messageId
+            messageId: data.messageId,
+            type: data.type || (isMedia ? 'image' : 'text'),
+            mediaUri: mediaUriDecrypted
           });
           
           if (data.messageId) {
@@ -81,12 +114,13 @@ class MessageRelayService {
 
           await saveMessageToDb({
               id: data.messageId,
-              content: decryptedContent,
+              content: textContent,
               senderId: data.from,
               timestamp: data.timestamp || Date.now(),
               isMe: false,
               status: 'read',
-              type: 'text'
+              type: data.type || (isMedia ? 'image' : 'text'),
+              mediaUri: mediaUriDecrypted
           });
 
         } else {
@@ -104,9 +138,61 @@ class MessageRelayService {
     });
 
     // Listen for group messages
-    this.socket.on('group-message', (data: any) => {
+    this.socket.on('group-message', async (data: any) => {
         console.log('MessageRelay: Received group message in', data.groupId);
-        EventBus.emit('message.group-received', data);
+        try {
+          if (data.ciphertext && data.ciphertext.version === 'v1_group_sender_key') {
+            const decryptedContent = await EncryptionService.decryptGroupMessage(data.groupId, data.from, data.ciphertext);
+            if (decryptedContent) {
+              console.log('MessageRelay: Group message decrypted successfully!');
+              
+              let textContent = decryptedContent;
+              let mediaUriDecrypted = data.mediaUri;
+              let isMedia = false;
+
+              try {
+                const parsed = JSON.parse(decryptedContent);
+                if (parsed && parsed.type === 'media') {
+                  textContent = parsed.text || '';
+                  isMedia = true;
+                  if (parsed.encryptedMediaUri && parsed.mediaKey && parsed.mediaIv) {
+                    const localDecryptedPath = await EncryptionService.decryptMedia(parsed.encryptedMediaUri, parsed.mediaKey, parsed.mediaIv);
+                    mediaUriDecrypted = localDecryptedPath;
+                  }
+                }
+              } catch (e) {
+                // Not media JSON
+              }
+
+              EventBus.emit('message.group-received', {
+                from: data.from,
+                groupId: data.groupId,
+                content: textContent,
+                timestamp: data.timestamp || Date.now(),
+                type: data.type || (isMedia ? 'image' : 'text'),
+                mediaUri: mediaUriDecrypted
+              });
+
+              await saveMessageToDb({
+                  id: data.messageId || Date.now().toString(),
+                  content: textContent,
+                  senderId: data.from,
+                  timestamp: data.timestamp || Date.now(),
+                  isMe: false,
+                  status: 'read',
+                  type: data.type || (isMedia ? 'image' : 'text'),
+                  mediaUri: mediaUriDecrypted
+              });
+            } else {
+              console.warn('MessageRelay: Failed to decrypt group message from', data.from);
+            }
+          } else {
+            // Fallback for unencrypted/legacy group messages
+            EventBus.emit('message.group-received', data);
+          }
+        } catch (err) {
+          console.error('MessageRelay: Error decrypting group message', err);
+        }
     });
 
     this.socket.on('connect_error', (err) => {
@@ -205,14 +291,63 @@ class MessageRelayService {
       }
   }
 
-  sendGroupMessage(groupId: string, content: string, type: string = 'text', mediaUri?: string) {
+  async sendGroupMessage(groupId: string, content: string, type: string = 'text', mediaUri?: string) {
+    try {
+      // 1. Distribute key to other group participants if not done
+      // For MVP/test-group, the remote participant is 'user2'
+      const participants = ['user2'];
+      const mySenderKey = await EncryptionService.getOrGenerateGroupSenderKey(groupId);
+
+      for (const userId of participants) {
+        const distributedKey = await getSignalStoreValue(`group_key_sent:${groupId}:${userId}`);
+        if (!distributedKey) {
+          console.log(`MessageRelay: Distributing group key for ${groupId} to participant ${userId}`);
+          const distributionPayload = JSON.stringify({
+            type: 'group-key-distribution',
+            groupId,
+            senderKey: mySenderKey
+          });
+          await this.sendSecureMessage(userId, distributionPayload);
+          await saveSignalStoreValue(`group_key_sent:${groupId}:${userId}`, 'true');
+        }
+      }
+
+      // 2. Encrypt the group message payload using our group sender key
+      let encryptedPayload: any;
+      if (type === 'image' || type === 'audio') {
+        if (mediaUri) {
+          console.log(`MessageRelay: Encrypting media attachment: ${mediaUri}`);
+          const mediaEncResult = await EncryptionService.encryptMedia(mediaUri);
+          
+          const mediaPayload = JSON.stringify({
+            type: 'media',
+            text: content,
+            encryptedMediaUri: mediaEncResult.encryptedUri,
+            mediaKey: mediaEncResult.key,
+            mediaIv: mediaEncResult.iv
+          });
+
+          encryptedPayload = await EncryptionService.encryptGroupMessage(groupId, mediaPayload);
+        } else {
+          encryptedPayload = await EncryptionService.encryptGroupMessage(groupId, content);
+        }
+      } else {
+        encryptedPayload = await EncryptionService.encryptGroupMessage(groupId, content);
+      }
+
+      const messageId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+
       this.sendMessage('group-message', {
           groupId,
-          content,
+          ciphertext: encryptedPayload,
           timestamp: Date.now(),
           type,
-          mediaUri
+          mediaUri,
+          messageId
       });
+    } catch (e) {
+      console.error('MessageRelay: Failed to send E2EE group message', e);
+    }
   }
 
   sendReadReceipt(toUserId: string, messageId: string) {
@@ -265,6 +400,64 @@ class MessageRelayService {
       return messageId;
     } catch (e) {
       console.error('MessageRelay: Failed to send secure message', e);
+      return null;
+    }
+  }
+
+  async sendSecureMessageWithMedia(toUserId: string, content: string, type: 'image' | 'audio', mediaUri: string) {
+    if (!EncryptionService.isInitialized()) {
+      console.error('MessageRelay: EncryptionService not initialized');
+      return null;
+    }
+
+    try {
+      const sessionExists = await EncryptionService.hasSession(toUserId);
+      if (!sessionExists) {
+        console.log(`MessageRelay: No active session for ${toUserId}. Initiating handshake...`);
+        const bundle = await this.fetchPreKeyBundle(toUserId);
+        if (!bundle) {
+          throw new Error(`E2EE bundle for recipient ${toUserId} not found on server.`);
+        }
+
+        const success = await EncryptionService.establishHybridSession(toUserId, bundle);
+        if (!success) {
+          throw new Error(`Cryptographic handshake with ${toUserId} failed.`);
+        }
+      }
+
+      console.log(`MessageRelay: Encrypting media attachment: ${mediaUri}`);
+      const mediaEncResult = await EncryptionService.encryptMedia(mediaUri);
+
+      const mediaPayload = JSON.stringify({
+        type: 'media',
+        text: content,
+        encryptedMediaUri: mediaEncResult.encryptedUri,
+        mediaKey: mediaEncResult.key,
+        mediaIv: mediaEncResult.iv
+      });
+
+      console.log(`MessageRelay: Encrypting E2EE hybrid envelope for ${toUserId}...`);
+      const ciphertext = await EncryptionService.encryptHybridMessage(toUserId, mediaPayload);
+      if (!ciphertext) {
+        throw new Error('Encryption failed');
+      }
+
+      const messageId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+
+      const payload = {
+        to: toUserId,
+        ciphertext,
+        timestamp: Date.now(),
+        messageId,
+        type,
+        mediaUri
+      };
+
+      await this.sendMessage('chat-message', payload);
+      console.log('MessageRelay: Secure hybrid media message sent successfully');
+      return messageId;
+    } catch (e) {
+      console.error('MessageRelay: Failed to send secure message with media', e);
       return null;
     }
   }

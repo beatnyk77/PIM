@@ -1,6 +1,6 @@
 import * as Signal from '@privacyresearch/libsignal-protocol-typescript';
 import { IdentityService, arrayBufferToBase64, base64ToArrayBuffer } from '../auth/IdentityService';
-import { getSignalStoreValue, saveSignalStoreValue, deleteSignalStoreValue } from '../storage/LocalDb';
+import { getSignalStoreValue, saveSignalStoreValue, deleteSignalStoreValue, getGroupSenderKeyFromDb, saveGroupSenderKeyToDb } from '../storage/LocalDb';
 import { createMlKem768 } from 'mlkem';
 
 import CryptoJS from 'crypto-js';
@@ -611,6 +611,144 @@ class EncryptionServiceClass {
     } catch (e) {
       console.error('EncryptionService: Failed to compute safety number', e);
       return null;
+    }
+  }
+
+  async getOrGenerateGroupSenderKey(groupId: string): Promise<string> {
+    const keys = await IdentityService.loadKeys();
+    if (!keys) throw new Error("Local identity keys not loaded");
+    const myId = keys.registrationId.toString();
+    
+    let key = await getGroupSenderKeyFromDb(groupId, myId);
+    if (!key) {
+      const randBytes = CryptoJS.lib.WordArray.random(32);
+      key = randBytes.toString(CryptoJS.enc.Hex);
+      await saveGroupSenderKeyToDb(groupId, myId, key);
+    }
+    return key;
+  }
+
+  async encryptGroupMessage(groupId: string, message: string): Promise<any> {
+    const keys = await IdentityService.loadKeys();
+    if (!keys) throw new Error("Local identity keys not loaded");
+    const myId = keys.registrationId.toString();
+
+    const currentSenderKey = await this.getOrGenerateGroupSenderKey(groupId);
+
+    const currentKeyWords = CryptoJS.enc.Hex.parse(currentSenderKey);
+    const K_msg = CryptoJS.HmacSHA256("GroupSenderKeyMessageKey", currentKeyWords).toString();
+    const nextSenderKey = CryptoJS.HmacSHA256("GroupSenderKeyNextKey", currentKeyWords).toString();
+
+    await saveGroupSenderKeyToDb(groupId, myId, nextSenderKey);
+
+    const iv = CryptoJS.lib.WordArray.random(16);
+    const encrypted = CryptoJS.AES.encrypt(message, CryptoJS.enc.Hex.parse(K_msg), {
+      iv: iv,
+      mode: CryptoJS.mode.CBC,
+      padding: CryptoJS.pad.Pkcs7
+    });
+
+    return {
+      version: 'v1_group_sender_key',
+      groupId,
+      senderId: myId,
+      ciphertext: encrypted.toString(),
+      iv: iv.toString()
+    };
+  }
+
+  async decryptGroupMessage(groupId: string, senderId: string, envelope: any): Promise<string | null> {
+    if (!envelope || envelope.version !== 'v1_group_sender_key') {
+      console.warn("decryptGroupMessage: Invalid envelope or version mismatch");
+      return null;
+    }
+
+    const currentSenderKey = await getGroupSenderKeyFromDb(groupId, senderId);
+    if (!currentSenderKey) {
+      console.warn(`decryptGroupMessage: No cached group sender key found for sender ${senderId} in group ${groupId}`);
+      return null;
+    }
+
+    try {
+      const currentKeyWords = CryptoJS.enc.Hex.parse(currentSenderKey);
+      const K_msg = CryptoJS.HmacSHA256("GroupSenderKeyMessageKey", currentKeyWords).toString();
+      const nextSenderKey = CryptoJS.HmacSHA256("GroupSenderKeyNextKey", currentKeyWords).toString();
+
+      const decrypted = CryptoJS.AES.decrypt(envelope.ciphertext, CryptoJS.enc.Hex.parse(K_msg), {
+        iv: CryptoJS.enc.Hex.parse(envelope.iv),
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.Pkcs7
+      });
+      const plaintext = decrypted.toString(CryptoJS.enc.Utf8);
+      if (!plaintext) {
+        throw new Error("Plaintext decryption resulted in empty string");
+      }
+
+      await saveGroupSenderKeyToDb(groupId, senderId, nextSenderKey);
+
+      return plaintext;
+    } catch (e) {
+      console.error(`decryptGroupMessage: Failed to decrypt group message from ${senderId}`, e);
+      return null;
+    }
+  }
+
+  async encryptMedia(fileUri: string): Promise<{ encryptedUri: string; key: string; iv: string }> {
+    try {
+      const FileSystem = require('expo-file-system/legacy');
+      const plaintextBase64 = await FileSystem.readAsStringAsync(fileUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const keyHex = CryptoJS.lib.WordArray.random(32).toString(CryptoJS.enc.Hex);
+      const ivHex = CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
+
+      const encrypted = CryptoJS.AES.encrypt(plaintextBase64, CryptoJS.enc.Hex.parse(keyHex), {
+        iv: CryptoJS.enc.Hex.parse(ivHex),
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.Pkcs7
+      });
+
+      const ciphertext = encrypted.toString();
+      const encryptedUri = fileUri + '.enc';
+      await FileSystem.writeAsStringAsync(encryptedUri, ciphertext, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      return { encryptedUri, key: keyHex, iv: ivHex };
+    } catch (e) {
+      console.error('EncryptionService: Failed to encrypt media', e);
+      throw e;
+    }
+  }
+
+  async decryptMedia(encryptedUri: string, keyHex: string, ivHex: string): Promise<string> {
+    try {
+      const FileSystem = require('expo-file-system/legacy');
+      const ciphertext = await FileSystem.readAsStringAsync(encryptedUri, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      const decrypted = CryptoJS.AES.decrypt(ciphertext, CryptoJS.enc.Hex.parse(keyHex), {
+        iv: CryptoJS.enc.Hex.parse(ivHex),
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.Pkcs7
+      });
+
+      const plaintextBase64 = decrypted.toString(CryptoJS.enc.Utf8);
+      if (!plaintextBase64) {
+        throw new Error("Media decryption resulted in empty string");
+      }
+
+      const decryptedUri = encryptedUri.replace('.enc', '') + '_decrypted';
+      await FileSystem.writeAsStringAsync(decryptedUri, plaintextBase64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      return decryptedUri;
+    } catch (e) {
+      console.error('EncryptionService: Failed to decrypt media', e);
+      throw e;
     }
   }
 }

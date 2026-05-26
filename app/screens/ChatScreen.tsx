@@ -61,7 +61,7 @@ export default function ChatScreen() {
 
   useEffect(() => {
     // Enable screenshot detection
-    const subscription = ScreenCapture.addScreenshotListener(() => {
+    const subscription = ScreenCapture.addScreenshotListener(async () => {
         const systemMsg: ChatMessage = {
             id: Date.now().toString(),
             content: '⚠️ Screenshot taken!',
@@ -71,12 +71,19 @@ export default function ChatScreen() {
             status: 'read'
         };
         addMessage(systemMsg);
+
+        // Relay screenshot event securely
+        if (activeGroup) {
+          await MessageRelay.sendGroupMessage(activeGroup, '⚠️ Screenshot taken!');
+        } else if (activeChat) {
+          await MessageRelay.sendSecureMessage(activeChat, '⚠️ Screenshot taken!');
+        }
     });
 
     return () => {
         subscription.remove();
     };
-  }, []);
+  }, [activeChat, activeGroup, addMessage]);
 
   useEffect(() => {
     AiAdvisor.initialize();
@@ -184,15 +191,17 @@ export default function ChatScreen() {
                  isMe: true,
                  status: 'sent',
                  type: 'audio',
-                 mediaUri: uri
+                 mediaUri: uri,
+                 groupId: activeGroup || undefined
             };
             addMessage(newMessage);
             
-            // In a real app, upload file then send URL. 
-            // For MVP/Relay, we might skip sending the audio blob over socket for now 
-            // or implement a file upload service.
-            // We'll just log it.
-            console.log('Voice note created at', uri);
+            if (activeGroup) {
+              await MessageRelay.sendGroupMessage(activeGroup, 'Voice Note', 'audio', uri);
+            } else if (activeChat) {
+              await MessageRelay.sendSecureMessageWithMedia(activeChat, 'Voice Note', 'audio', uri);
+            }
+            console.log('Voice note created and sent at', uri);
         }
     } catch (error) {
         console.error('Failed to stop recording', error);
@@ -207,6 +216,7 @@ export default function ChatScreen() {
     });
 
     if (!result.canceled && result.assets[0].uri) {
+         const uri = result.assets[0].uri;
          const newMessage: ChatMessage = {
              id: Date.now().toString(),
              content: 'Image',
@@ -215,9 +225,16 @@ export default function ChatScreen() {
              isMe: true,
              status: 'sent',
              type: 'image',
-             mediaUri: result.assets[0].uri
+             mediaUri: uri,
+             groupId: activeGroup || undefined
         };
         addMessage(newMessage);
+
+        if (activeGroup) {
+          await MessageRelay.sendGroupMessage(activeGroup, 'Image', 'image', uri);
+        } else if (activeChat) {
+          await MessageRelay.sendSecureMessageWithMedia(activeChat, 'Image', 'image', uri);
+        }
     }
   };
 
