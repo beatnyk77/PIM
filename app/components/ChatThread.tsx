@@ -5,9 +5,10 @@ import { Audio } from 'expo-av';
 
 interface ChatThreadProps {
   messages: ChatMessage[];
+  onLongPressMessage?: (message: ChatMessage) => void;
 }
 
-export default function ChatThread({ messages }: ChatThreadProps) {
+export default function ChatThread({ messages, onLongPressMessage }: ChatThreadProps) {
   const playSound = async (uri: string) => {
     try {
         const { sound } = await Audio.Sound.createAsync({ uri });
@@ -30,11 +31,16 @@ export default function ChatThread({ messages }: ChatThreadProps) {
     }
 
     return (
-      <View className={`mb-2 max-w-[80%] p-3 rounded-lg ${
-        item.isMe 
-          ? 'bg-blue-500 self-end rounded-tr-none' 
-          : 'bg-gray-200 self-start rounded-tl-none'
-      }`}>
+      <TouchableOpacity 
+        onLongPress={() => onLongPressMessage?.(item)}
+        delayLongPress={300}
+        activeOpacity={0.8}
+        className={`mb-2 max-w-[80%] p-3 rounded-lg ${
+          item.isMe 
+            ? 'bg-blue-500 self-end rounded-tr-none' 
+            : 'bg-gray-200 self-start rounded-tl-none'
+        }`}
+      >
         {item.type === 'image' && item.mediaUri ? (
           <Image source={{ uri: item.mediaUri }} className="w-48 h-32 rounded-lg" resizeMode="cover" />
         ) : item.type === 'audio' && item.mediaUri ? (
@@ -57,7 +63,7 @@ export default function ChatThread({ messages }: ChatThreadProps) {
               </Text>
           )}
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 

@@ -424,6 +424,29 @@ class MessageRelayService {
 
               try {
                 const parsed = JSON.parse(decryptedContent);
+                if (parsed && parsed.type === 'group-moderation') {
+                  if (parsed.action === 'delete-message' && parsed.targetMessageId) {
+                    console.log(`[MessageRelay] Received admin moderation delete request for message ${parsed.targetMessageId}`);
+                    const { GroupSessionManager } = require('./GroupSessionManager');
+                    const roster = await GroupSessionManager.getGroupRoster(data.groupId);
+                    const senderNode = (roster as any[]).find((m: any) => m.userId === data.from);
+                    
+                    if (senderNode && senderNode.role === 'admin') {
+                      console.log(`[MessageRelay] Cryptographic admin role verified for ${data.from}. Executing deletion...`);
+                      const { deleteMessageFromDb } = require('../storage/LocalDb');
+                      await deleteMessageFromDb(parsed.targetMessageId);
+
+                      const { useStore } = require('../storage/StateManager');
+                      useStore.getState().deleteMessage(parsed.targetMessageId);
+                      
+                      EventBus.emit('message.deleted', { messageId: parsed.targetMessageId });
+                    } else {
+                      console.warn(`[MessageRelay] Security breach block: Non-admin ${data.from} tried to delete message!`);
+                    }
+                  }
+                  return; // Void further rendering for control packet
+                }
+
                 if (parsed && parsed.type === 'media') {
                   textContent = parsed.text || '';
                   isMedia = true;

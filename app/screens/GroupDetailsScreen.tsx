@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Alert, Switch, Clipboard } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { GroupSessionManager, GroupMember } from '../services/messaging/GroupSessionManager';
 import { useStore } from '../services/storage/StateManager';
 import { IdentityService } from '../services/auth/IdentityService';
+import GroupQrCode from '../components/GroupQrCode';
 
 export default function GroupDetailsScreen() {
   const navigation = useNavigation();
@@ -13,6 +14,12 @@ export default function GroupDetailsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [myId, setMyId] = useState<string | null>(null);
   const [amIAdmin, setAmIAdmin] = useState(false);
+
+  // Invite link generation states
+  const [isBurnOnUse, setIsBurnOnUse] = useState(true);
+  const [isTimeLimited, setIsTimeLimited] = useState(false);
+  const [generatedLink, setGeneratedLink] = useState<string | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState(false);
 
   useEffect(() => {
     loadGroupData();
@@ -43,6 +50,26 @@ export default function GroupDetailsScreen() {
       console.error('Failed to load group details', e);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleGenerateInvite = async () => {
+    if (!activeGroup) return;
+    const inviteToken = `inv_${Math.random().toString(36).substring(2, 10)}`;
+    
+    // Register invite token locally in group storage
+    await GroupSessionManager.registerInviteToken(activeGroup, inviteToken, isBurnOnUse);
+
+    const base = `pim://group/join/${activeGroup}`;
+    const link = `${base}?token=${inviteToken}&burn=${isBurnOnUse}&ephemeral=${isTimeLimited}`;
+    setGeneratedLink(link);
+  };
+
+  const handleCopyLink = () => {
+    if (generatedLink) {
+      Clipboard.setString(generatedLink);
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 2000);
     }
   };
 
@@ -98,6 +125,67 @@ export default function GroupDetailsScreen() {
                 <Text className="text-lg font-bold text-green-600 mr-2">{epoch}</Text>
                 <Text className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">Rotates on Revocation</Text>
             </View>
+          </View>
+
+          {/* Secure Ephemeral Invite Sharing Card */}
+          <View className="bg-white p-4 rounded-xl border border-gray-200 mb-6 shadow-sm">
+            <Text className="text-sm text-purple-700 font-bold uppercase tracking-wider mb-3">🛡️ Secure Invite Link (QR + Copy)</Text>
+            
+            <View className="flex-row justify-between items-center mb-3">
+              <View className="flex-1 mr-4">
+                <Text className="text-sm font-semibold text-gray-800">Burn on Use (One-Time Invite)</Text>
+                <Text className="text-xs text-gray-400">Link self-destructs instantly after being consumed once.</Text>
+              </View>
+              <Switch
+                value={isBurnOnUse}
+                onValueChange={setIsBurnOnUse}
+                trackColor={{ false: '#e5e7eb', true: '#a855f7' }}
+              />
+            </View>
+
+            <View className="flex-row justify-between items-center mb-4">
+              <View className="flex-1 mr-4">
+                <Text className="text-sm font-semibold text-gray-800">Time-Limited Link (10 Minutes)</Text>
+                <Text className="text-xs text-gray-400">Link automatically expires after 10 minutes.</Text>
+              </View>
+              <Switch
+                value={isTimeLimited}
+                onValueChange={setIsTimeLimited}
+                trackColor={{ false: '#e5e7eb', true: '#a855f7' }}
+              />
+            </View>
+
+            <TouchableOpacity
+              onPress={handleGenerateInvite}
+              className="bg-purple-600 p-3 rounded-xl items-center mb-4 active:bg-purple-700 shadow-sm"
+            >
+              <Text className="text-white font-bold">Generate Secure invite</Text>
+            </TouchableOpacity>
+
+            {generatedLink && (
+              <View className="items-center mt-2 p-3 bg-purple-50 rounded-xl border border-purple-100">
+                <GroupQrCode value={generatedLink} size={150} />
+                
+                <Text className="text-gray-500 font-mono text-[10px] text-center mt-3 select-all bg-white p-2 rounded border border-gray-200 w-full" numberOfLines={1}>
+                  {generatedLink}
+                </Text>
+
+                <TouchableOpacity
+                  onPress={handleCopyLink}
+                  className={`mt-3 w-full py-2.5 rounded-lg items-center ${copyFeedback ? 'bg-green-600' : 'bg-gray-800'} active:opacity-90`}
+                >
+                  <Text className="text-white font-bold text-sm">
+                    {copyFeedback ? 'Copied! ✓ 📋' : 'Copy Secure Link'}
+                  </Text>
+                </TouchableOpacity>
+
+                {isBurnOnUse && (
+                  <Text className="text-[10px] text-orange-600 font-semibold text-center mt-2">
+                    ⏳ Burn-on-use enabled. Link will self-destruct once scanned/joined.
+                  </Text>
+                )}
+              </View>
+            )}
           </View>
 
           <Text className="text-lg font-bold text-gray-900 mb-2">Members ({roster.length})</Text>

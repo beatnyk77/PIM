@@ -6,6 +6,7 @@ export type AppEvents = {
   'message.secure-received': { from: string, content: string, timestamp: number, messageId?: string, type?: string, mediaUri?: string };
   'message.group-received': { from: string, groupId: string, content: string, timestamp: number, type?: string, mediaUri?: string };
   'message.read-receipt': { messageId: string; from: string };
+  'message.deleted': { messageId: string };
   'group.security_update': { groupId: string; message: string };
   
   // Connection Events

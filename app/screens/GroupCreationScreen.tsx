@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, SafeAreaView, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, SafeAreaView, ScrollView, Switch, Clipboard } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { GroupSessionManager } from '../services/messaging/GroupSessionManager';
 import { MessageRelay } from '../services/messaging/MessageRelay';
 import { useStore } from '../services/storage/StateManager';
+import GroupQrCode from '../components/GroupQrCode';
 
 export default function GroupCreationScreen() {
   const navigation = useNavigation<any>();
@@ -13,7 +14,15 @@ export default function GroupCreationScreen() {
   const [memberIdInput, setMemberIdInput] = useState('');
   const [members, setMembers] = useState<string[]>([]); // Storing User IDs
   const [isCreating, setIsCreating] = useState(false);
-  const [isEphemeralLink, setIsEphemeralLink] = useState(false);
+  const [isEphemeralLink, setIsEphemeralLink] = useState(true); // Default to one-time / ephemeral
+  const [copyFeedback, setCopyFeedback] = useState(false);
+
+  const handleCopyLink = () => {
+    const link = generateInviteLink();
+    Clipboard.setString(link);
+    setCopyFeedback(true);
+    setTimeout(() => setCopyFeedback(false), 2000);
+  };
 
   const addMember = () => {
     if (memberIdInput.trim() && !members.includes(memberIdInput.trim())) {
@@ -114,21 +123,33 @@ export default function GroupCreationScreen() {
           </View>
         )}
 
-        <View className="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-6">
+        <View className="bg-purple-50 p-4 rounded-xl border border-purple-100 mb-6 shadow-sm">
           <View className="flex-row justify-between items-center mb-2">
-            <Text className="text-blue-800 font-semibold">Invite Link</Text>
+            <Text className="text-purple-800 font-semibold text-sm">Secure Invite Link</Text>
             <TouchableOpacity 
               onPress={() => setIsEphemeralLink(!isEphemeralLink)}
-              className={`px-3 py-1 rounded-full border ${isEphemeralLink ? 'bg-orange-100 border-orange-300' : 'bg-blue-100 border-blue-300'}`}
+              className={`px-3 py-1 rounded-full border ${isEphemeralLink ? 'bg-orange-100 border-orange-300' : 'bg-purple-100 border-purple-300'}`}
             >
-              <Text className={`text-xs font-bold ${isEphemeralLink ? 'text-orange-700' : 'text-blue-700'}`}>
+              <Text className={`text-[10px] font-extrabold uppercase ${isEphemeralLink ? 'text-orange-700' : 'text-purple-700'}`}>
                 {isEphemeralLink ? '⏳ One-Time' : '♾️ Permanent'}
               </Text>
             </TouchableOpacity>
           </View>
-          <Text className="text-blue-600 text-sm mb-2">You can also share an invite link after creation.</Text>
-          <View className="bg-white p-2 rounded border border-blue-200">
-             <Text className="text-gray-500 font-mono text-xs">{generateInviteLink()}</Text>
+          <Text className="text-purple-600 text-xs mb-3">You can scan or copy this E2EE invite link now, or manage it after group creation.</Text>
+          
+          <View className="items-center bg-white p-3 rounded-lg border border-purple-100 shadow-inner">
+            <GroupQrCode value={generateInviteLink()} size={120} />
+            <Text className="text-gray-500 font-mono text-[9px] mt-2 select-all w-full text-center bg-gray-50 p-1.5 rounded border border-gray-150" numberOfLines={1}>
+              {generateInviteLink()}
+            </Text>
+            <TouchableOpacity 
+              onPress={handleCopyLink} 
+              className={`mt-2.5 w-full py-2 rounded-lg items-center ${copyFeedback ? 'bg-green-600' : 'bg-purple-600'} active:opacity-90 shadow-sm`}
+            >
+              <Text className="text-white font-bold text-xs">
+                {copyFeedback ? 'Copied! ✓ 📋' : 'Copy Invite Link'}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 

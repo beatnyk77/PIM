@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, SafeAreaView, KeyboardAvoidingView, Platform, TextInput, TouchableOpacity, Text, ActivityIndicator, Modal, ScrollView } from 'react-native';
+import { View, SafeAreaView, KeyboardAvoidingView, Platform, TextInput, TouchableOpacity, Text, ActivityIndicator, Modal, ScrollView, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import ChatThread from '../components/ChatThread';
 import { useStore, ChatMessage } from '../services/storage/StateManager';
@@ -12,6 +12,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ScreenCapture from 'expo-screen-capture';
 import { useCommitmentStore } from '../stores/useCommitmentStore';
 import { EncryptionService } from '../services/messaging/EncryptionService';
+import { IdentityService } from '../services/auth/IdentityService';
 
 export default function ChatScreen() {
   const { messages, addMessage, setMessages, updateMessageStatus, activeChat, activeGroup, setActiveGroup, setActiveChat, settings, deleteMessage } = useStore();
@@ -33,6 +34,94 @@ export default function ChatScreen() {
   // Safety Number State
   const [safetyNumber, setSafetyNumber] = useState<string | null>(null);
   const [showSafetyModal, setShowSafetyModal] = useState(false);
+
+  // Moderation & Search States
+  const [amIAdmin, setAmIAdmin] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [aiSearchSummary, setAiSearchSummary] = useState<string | null>(null);
+  const [isAiSearchLoading, setIsAiSearchLoading] = useState(false);
+
+  useEffect(() => {
+    const checkAdmin = async () => {
+      if (activeGroup) {
+        const { GroupSessionManager } = require('../services/messaging/GroupSessionManager');
+        const roster = await GroupSessionManager.getGroupRoster(activeGroup);
+        const keys = await IdentityService.loadKeys();
+        const myId = keys?.registrationId.toString();
+        const me = (roster as any[]).find((m: any) => m.userId === myId);
+        setAmIAdmin(me?.role === 'admin');
+      } else {
+        setAmIAdmin(false);
+      }
+    };
+    checkAdmin();
+  }, [activeGroup, messages]);
+
+  const handleLongPressMessage = (message: ChatMessage) => {
+    if (message.senderId === 'system') return;
+    
+    let canDeleteEveryone = false;
+    if (activeGroup) {
+      if (amIAdmin || message.isMe) {
+        canDeleteEveryone = true;
+      }
+    } else {
+      if (message.isMe) {
+        canDeleteEveryone = true;
+      }
+    }
+
+    Alert.alert(
+      "🛡️ Message Options",
+      "Choose an action for this end-to-end encrypted message:",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete for Me (Local)",
+          style: "destructive",
+          onPress: () => {
+            deleteMessage(message.id);
+          }
+        },
+        canDeleteEveryone ? {
+          text: "Delete for Everyone",
+          style: "destructive",
+          onPress: async () => {
+            if (activeGroup) {
+              const moderationCommand = JSON.stringify({
+                type: 'group-moderation',
+                action: 'delete-message',
+                targetMessageId: message.id
+              });
+              await MessageRelay.sendGroupMessage(activeGroup, moderationCommand);
+            }
+            deleteMessage(message.id);
+          }
+        } : null
+      ].filter(Boolean) as any
+    );
+  };
+
+  const handleGenerateAiSearchSummary = async () => {
+    const threadMessages = messages.filter(m => activeGroup ? m.groupId === activeGroup : !m.groupId);
+    const filteredMessages = threadMessages.filter(m => m.content.toLowerCase().includes(searchQuery.toLowerCase()));
+    
+    if (filteredMessages.length === 0) return;
+    setIsAiSearchLoading(true);
+    setAiSearchSummary(null);
+    try {
+      const contextText = filteredMessages.slice(0, 10).map(m => `${m.senderId === 'me' ? 'Me' : m.senderId}: ${m.content}`).join('\n');
+      const prompt = `Here are search results for "${searchQuery}" in our local group chat history:\n${contextText}\nProvide a single-sentence, concise summary explaining what was discussed regarding "${searchQuery}". Keep it under 25 words, strictly based on these messages. Do not extrapolate.`;
+      const summary = await AiAdvisor.query(prompt);
+      setAiSearchSummary(summary);
+    } catch (err) {
+      console.error("AI Summary generation failed", err);
+      setAiSearchSummary("Failed to generate summary locally.");
+    } finally {
+      setIsAiSearchLoading(false);
+    }
+  };
 
   useEffect(() => {
     const fetchSafetyNumber = async () => {
@@ -372,13 +461,19 @@ export default function ChatScreen() {
     setInputText(reply);
   };
 
+  const threadMessages = messages.filter(m => activeGroup ? m.groupId === activeGroup : !m.groupId);
+  const filteredMessages = threadMessages.filter(m => {
+    if (!showSearch || !searchQuery) return true;
+    return m.content.toLowerCase().includes(searchQuery.toLowerCase());
+  });
+
   return (
     <SafeAreaView className="flex-1 bg-white">
       {/* Header */}
       <View className="p-4 border-b border-gray-200 flex-row justify-between items-center bg-gray-50/50">
-        <View>
+        <View className="flex-1 mr-2">
           <View className="flex-row items-center">
-            <Text className="text-xl font-bold text-gray-900">
+            <Text className="text-lg font-bold text-gray-900" numberOfLines={1}>
                 {activeGroup ? `Group: ${activeGroup}` : `Chat with ${activeChat}`}
             </Text>
             {!activeGroup && safetyNumber && (
@@ -395,9 +490,18 @@ export default function ChatScreen() {
         </View>
         <View className="flex-row items-center gap-3">
             {activeGroup && (
+              <View className="flex-row items-center gap-3">
+                <TouchableOpacity onPress={() => {
+                  setShowSearch(!showSearch);
+                  setSearchQuery('');
+                  setAiSearchSummary(null);
+                }} className="p-1">
+                    <Text className="text-base">🔍</Text>
+                </TouchableOpacity>
                 <TouchableOpacity onPress={() => navigation.navigate('GroupDetails')}>
                     <Text className="text-blue-600 font-semibold text-sm">Group Info</Text>
                 </TouchableOpacity>
+              </View>
             )}
             <TouchableOpacity onPress={toggleGroupMode}>
                 <Text className="text-gray-500 font-semibold text-sm">{activeGroup ? 'Exit' : 'Join Group'}</Text>
@@ -405,8 +509,76 @@ export default function ChatScreen() {
         </View>
       </View>
 
+      {/* Local E2EE Search Input Bar */}
+      {showSearch && (
+        <View className="bg-slate-50 border-b border-gray-200 p-3 shadow-sm">
+          <View className="flex-row items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5">
+            <Text className="text-gray-400 mr-2 text-sm">🔍</Text>
+            <TextInput
+              className="flex-1 text-sm text-gray-800 p-0"
+              placeholder="Search E2EE messages locally..."
+              value={searchQuery}
+              onChangeText={(txt) => {
+                setSearchQuery(txt);
+                setAiSearchSummary(null);
+              }}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => {
+                setSearchQuery('');
+                setAiSearchSummary(null);
+              }}>
+                <Text className="text-gray-400 font-bold px-1 text-xs">✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* AI Search Summary Actions & Panel */}
+          {searchQuery.trim().length > 0 && (
+            <View className="mt-2.5">
+              {filteredMessages.length > 0 ? (
+                <View>
+                  {!aiSearchSummary ? (
+                    <TouchableOpacity
+                      onPress={handleGenerateAiSearchSummary}
+                      disabled={isAiSearchLoading}
+                      className="bg-purple-100 py-1.5 px-3 rounded-full flex-row items-center justify-center self-start active:bg-purple-200"
+                    >
+                      {isAiSearchLoading ? (
+                        <ActivityIndicator size="small" color="#9333ea" className="mr-1.5" />
+                      ) : (
+                        <Text className="text-purple-700 text-[10px] font-extrabold uppercase">✨ Generate local AI Search Summary</Text>
+                      )}
+                    </TouchableOpacity>
+                  ) : (
+                    <View className="bg-purple-50 border border-purple-200 p-3 rounded-xl shadow-inner relative">
+                      <View className="flex-row justify-between items-center mb-1">
+                        <Text className="text-[10px] uppercase font-extrabold tracking-wider text-purple-600">✨ local AI Search Summary</Text>
+                        <TouchableOpacity onPress={() => setAiSearchSummary(null)}>
+                          <Text className="text-gray-400 text-xs font-bold">✕</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <Text className="text-purple-950 text-xs leading-relaxed font-medium">
+                        {aiSearchSummary}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <Text className="text-gray-400 text-xs italic ml-1">No search results found locally.</Text>
+              )}
+            </View>
+          )}
+        </View>
+      )}
+
       <View className="flex-1">
-        <ChatThread messages={messages.filter(m => activeGroup ? m.groupId === activeGroup : !m.groupId)} />
+        <ChatThread 
+          messages={filteredMessages} 
+          onLongPressMessage={handleLongPressMessage}
+        />
       </View>
 
       {/* AI Toolbar */}

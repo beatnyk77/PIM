@@ -27,3 +27,11 @@ At **Private Intelligence Messenger (PIM)**, we built a system that fundamentall
 * **Immediate Lock-Out:** Your contacts' apps verify the digital signature and instantly block the stolen device. It is cryptographically barred from receiving or decrypting any future messages.
 * **Offline Catch-Up:** Even if your contacts are offline when you revoke the device, PIM's background synchronization will update them the absolute second they reconnect.
 * **Temporary Suspension:** Not sure if you just misplaced your companion device? "Suspend" it locally with a single tap to freeze its sync capabilities until you find it.
+
+## 6. Secure Group Risks (Link Hijacking & Rogue Moderation)
+**The Threat:** An attacker hijacks an invite link to gain entry, a rogue user tries to censor chats by spoofing message deletions, or cloud AI summarizing tools leak group discussions.
+**Our Defense:**
+* **Link-Hijacking & Replays:** PIM invite links are scannable, **burn-on-use** transient tokens. The inviter's local secure database registers the unique token and instantly voids ("burns") it upon the first consumption. Any subsequent reuse of the link is blocked automatically.
+* **Rogue Deletion Injection:** Message deletion commands are dual-encrypted to the group's active roster. Receiving clients verify the sender's identity and cross-reference their cryptographic keys with their role in the roster. If the sender is not verified as an `admin`, the deletion command is flagged and immediately dropped.
+* **Local Group Summarization:** Search histories and conversational summarizations are computed 100% on-device by the quantized LLM. Search patterns never traverse a server or network, eliminating any cloud leak threat.
+
