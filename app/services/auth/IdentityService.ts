@@ -298,4 +298,17 @@ export class IdentityService {
     await SecureStore.deleteItemAsync(STORAGE_KEY);
     await SecureStore.deleteItemAsync('pq_identity_keys_v1');
   }
+
+  static async authenticateUser(passphrase: string, isDecoy: boolean = false): Promise<boolean> {
+    const { initializeSecureDb } = require('../storage/LocalDb');
+    return await initializeSecureDb(passphrase, isDecoy);
+  }
+
+  static async executePanicZeroization(): Promise<boolean> {
+    console.warn('[IdentityService] Panic Zeroization request received. Purging all keys...');
+    await this.clearKeys();
+    
+    const { executeAppZeroization } = require('../storage/LocalDb');
+    return await executeAppZeroization();
+  }
 }

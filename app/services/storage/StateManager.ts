@@ -20,6 +20,8 @@ export interface AppSettings {
   readReceiptsEnabled: boolean;
   delayedSendEnabled: boolean;
   defaultSelfDestructTime: number; // in seconds, 0 = off
+  panicGestureEnabled: boolean;
+  decoyVaultEnabled: boolean;
 }
 
 interface AppState {
@@ -47,6 +49,8 @@ export const useStore = create<AppState>((set, get) => ({
     readReceiptsEnabled: true,
     delayedSendEnabled: false,
     defaultSelfDestructTime: 0,
+    panicGestureEnabled: false,
+    decoyVaultEnabled: false,
   },
   setActiveChat: (chatId) => set({ activeChat: chatId, activeGroup: null }),
   setActiveGroup: (groupId) => set({ activeGroup: groupId, activeChat: null }),

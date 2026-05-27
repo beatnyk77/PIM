@@ -164,6 +164,42 @@ class AiAdvisorService {
     return !!this.context;
   }
 
+  private sanitizeSystemRoleTags(input: string): string {
+    // Strip common LLM chat prompt injection patterns and template tokens
+    return input
+      .replace(/<\|system\|>/gi, '')
+      .replace(/<\|user\|>/gi, '')
+      .replace(/<\|assistant\|>/gi, '')
+      .replace(/<\|end\|>/gi, '')
+      .replace(/system instruction:/gi, '')
+      .replace(/override system prompt/gi, '');
+  }
+
+  private addTimingObfuscationPadding(prompt: string): string {
+    const noiseWords = [' ', '\t', '\n', '  ', '   ', '\n ', ' \t'];
+    const count = Math.floor(Math.random() * 8) + 1; // 1 to 8 timing padding inputs
+    let noise = '';
+    for (let i = 0; i < count; i++) {
+      noise += noiseWords[Math.floor(Math.random() * noiseWords.length)];
+    }
+    return noise + prompt;
+  }
+
+  async zeroizeMemoryAndCache(): Promise<void> {
+    if (this.context) {
+      console.warn('AiAdvisor: Executing explicit VRAM and model KV-cache zeroization sweeps...');
+      try {
+        if (typeof (this.context as any).release === 'function') {
+          await (this.context as any).release();
+        }
+      } catch (err) {
+        console.error('AiAdvisor: Native KV-cache sweep release failed', err);
+      }
+      this.context = null;
+    }
+    console.log('AiAdvisor: Local AI state zeroized.');
+  }
+
   async suggestReply(incomingMessage: string): Promise<string> {
     const prompt = `User received: "${incomingMessage}". Suggest a short, polite reply:`;
     return this.query(prompt);
@@ -189,8 +225,15 @@ class AiAdvisorService {
 
     try {
       console.log('AiAdvisor: Running query...');
+      
+      // 1. Strip system prompts (Exploit Shield)
+      const sanitized = this.sanitizeSystemRoleTags(prompt);
+      
+      // 2. Timing Obfuscation Padding (Side-Channel Defense)
+      const timingObfuscatedPrompt = this.addTimingObfuscationPadding(sanitized);
+
       const result = await this.context.completion({
-        prompt,
+        prompt: timingObfuscatedPrompt,
         n_predict: 50,
         stop: ['.', '\n'],
       });

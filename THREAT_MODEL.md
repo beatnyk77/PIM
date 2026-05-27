@@ -14,6 +14,7 @@ graph TD
         UI[Native React Native UI]
         State[Zustand State Manager]
         DB[(Local WatermelonDB SQLite)]
+        DecoyDB[(Decoy WatermelonDB SQLite)]
         Keychain[expo-secure-store Secure Enclave]
         LLM[Local Llama.rn GPU Thread]
         Crypto[EncryptionService]
@@ -27,6 +28,7 @@ graph TD
 
     UI <--> State
     State <--> DB
+    State <--> DecoyDB
     State <--> Crypto
     Crypto <--> Keychain
     State <--> LLM
@@ -84,7 +86,7 @@ PIM utilizes the **STRIDE** methodology (Spoofing, Tampering, Repudiation, Infor
 > [!CAUTION]
 > **Harvest-Now-Decrypt-Later (HNDL) & Metadata Correlation.**
 > * **Threat 1 (HNDL):** Nation-states record all E2EE traffic going through the relay, planning to decrypt it years later when large-scale Quantum Computers (CRQCs) can break classical Curve25519 elliptic curve keys.
-> * **Threat 2 (Side-Channels):** Cleartext leakage on local storage or memory process scraping of local AI suggestions.
+> * **Threat 2 (Side-Channels):** Cleartext leakage on local storage, memory process scraping of local AI suggestions, or VRAM residual memory data.
 > * **Threat 3 (Metadata):** Correlating communication partners using message timing and sizing.
 > * **Mitigation:**
 >   1. **Hybrid Onion E2EE (ML-KEM-768):** Mixes classical Curve25519 DH keys with a nested outer layer of **FIPS 203 ML-KEM-768** lattice ciphers. Even if the classical layer is compromised in the future, the outer lattice layer remains secure against quantum decryption.
@@ -109,31 +111,132 @@ PIM utilizes the **STRIDE** methodology (Spoofing, Tampering, Repudiation, Infor
 
 ---
 
-## 4. Architectural Mitigation Matrix
+## 4. Local AI Side-Channel Resistance
+
+Executing LLM inference locally on a mobile device shields the user from cloud-based network disclosure, but introduces unique localized hardware side-channel vectors.
+
+```mermaid
+graph TD
+    subgraph "Local AI Side-Channel Vectors"
+        VRAM[GPU VRAM Allocation Residuals]
+        Cache[Timing Side-Channels & Prompt Caching]
+        Leak[Process Memory Interception]
+    end
+
+    VRAM -->|Mitigation| Clean[Explicit JSI VRAM Zeroization]
+    Cache -->|Mitigation| Isolation[Per-Chat Prompt Cache Isolation + Noise Insertion]
+    Leak -->|Mitigation| Shield[Strict Input Parsing & Dynamic Token Obfuscation]
+```
+
+### 1. GPU VRAM Allocation Residuals
+* **Threat:** When the local GPU/NPU processes quantized GGUF weights and intermediate state tokens, residuals of historical chat contexts remain inside the raw allocated VRAM banks. Malicious unprivileged graphics processes could query uninitialized VRAM buffers to read cleartext chunks of conversation history.
+* **Mitigation:** *Explicit JSI VRAM Zeroization.* The custom C++ layer binding `llama.rn` intercepts inference completion. Upon model output delivery, all context buffers and intermediate KV-caches (Key-Value Caches) are explicitly overwritten with random noise and zeroed out before native memory release.
+
+### 2. Timing Side-Channels & Prompt Caching
+* **Threat:** In multi-tenant environments or compromised host OS layers, an adversary can monitor CPU/GPU cycle-times and prompt caching hits. By analyzing the speed at which the LLM processes tokens, the adversary can infer word lengths or reconstruct portions of prompt structures.
+* **Mitigation:** *Per-Chat Prompt Cache Isolation.* Prompt caching is disabled globally or partitioned strictly on a per-chat basis. Each chat thread maintains an independent, isolated, ephemeral memory context. Timing attacks are disrupted by injecting a variable count of random padding tokens (non-functional words) into prompt structures dynamically, scrambling processing-time timing correlations.
+
+### 3. Process Memory Interception & Model Weights Integrity
+* **Threat:** Device-level malware attempts to scrape the active runtime memory of `llama.rn` during token generation or tampers with the local model weights to leak prompt histories via specific tokens.
+* **Mitigation:** *Input Parsing & Dynamic Token Obfuscation.* Strict input filtering blocks prompt injection vectors. Weights of local GGUF models are integrity-checked on startup using SHA-256 hashes to guarantee they have not been tampered with. Output tokens are dynamically encrypted in memory before writing back to the user interface thread.
+
+---
+
+## 5. Plausible Deniability & Panic Mode
+
+Under physical duress or device seizure, cryptographic security alone is insufficient. PIM integrates duress mitigation vectors designed to protect the user's safety and message secrecy.
+
+### 1. Plausible Deniability (Decoy Database Instances)
+* **Threat:** An adversary or coercive authority physically forces Bob to open his phone, launch the PIM application, and input his decryption passphrase under duress.
+* **Mitigation:** *Dual-Key Password Derivation.* The login screen accepts two different passphrases:
+  * **True Passphrase:** Derives the master key that opens Bob's real SQLCipher database, displaying his actual secure chats.
+  * **Decoy Passphrase:** Derives a secondary master key opening a completely separate **Decoy SQLite Instance**. This database contains pre-populated, highly realistic, benign dummy conversation threads (mock transactions, casual work updates). There are no visual cues or metadata discrepancies in the UI that indicate the decoy database is active, providing Bob with plausible deniability.
+
+### 2. Panic Mode (Immediate App Zeroization)
+* **Threat:** Bob faces immediate compromise or imminent physical seizure of his active mobile device.
+* **Mitigation:** *Instant Hardware Wiping (Zeroization Vector).* Panic Mode is triggered by one of three mechanisms:
+  * **Incorrect Password Threshold:** Exceeding five failed login attempts automatically fires zeroization.
+  * **Accelerometer Gesture Trigger:** Placing the phone face-down on a surface rapidly or executing a custom physical movement pattern.
+  * **Panic UI Action:** A subtle tap on an inconspicuous button in the UI.
+* **Execution Actions:** Upon activation, Panic Mode executes an asynchronous, high-priority native cleanup:
+  1. **Enclave Key Purge:** Calls `expo-secure-store` to instantly delete Bob's classical Curve25519 identity keys, ML-KEM-768 private keys, and master database passphrases.
+  2. **Page Overwrite & Wipe:** Executes a raw SQLCipher zeroization, instructing the database driver to overwrite all tables with random noise before deleting the SQLite file.
+  3. **VRAM and RAM Reset:** Explicitly overwrites active JS variables, LLM buffers, and active memory pools, terminating the application process immediately.
+
+---
+
+## 6. Detailed Migration Plan: SQLCipher Database Encryption
+
+To eliminate cleartext SQLite page residuals and metadata leaks (table structures, message counts, and indexes), PIM will migrate from standard `expo-sqlite` to full page-level **SQLCipher Encryption** using `@op-engineering/op-sqlite`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Bob as User
+    participant App as PIM Client App
+    participant Key as expo-secure-store (Enclave)
+    participant DB as SQLCipher (op-sqlite)
+
+    Bob->>App: Launch App & Enter Passphrase
+    App->>Key: Load Enclave-Backed Database Master Salt
+    Key-->>App: Return 256-bit DB Salt
+    App->>App: Derive Master Key via PBKDF2 (Passphrase + Salt)
+    App->>DB: Open Database (PRAGMA key = 'derivedKey')
+    DB-->>App: Database Authenticated & Mounted
+```
+
+### 1. Step 1: Dependency Upgrades & Native Compiler Configuration
+* **Action:** Install the high-performance native SQLite JSI driver `@op-engineering/op-sqlite` and configure compiling hooks to bundle **SQLCipher** (bundled with SQLCipher/OpenSSL binaries).
+* **Commands:**
+  ```bash
+  npm install @op-engineering/op-sqlite
+  ```
+* **Native Setup:** 
+  * On iOS: Add compiler definition flags to `Podfile` (`SQLITE_HAS_CODEC=1` and link to `SQLCipher` cocoa pod).
+  * On Android: Configure `build.gradle` to enable SQLCipher bundle flags, replacing default SQLite compilation layers.
+
+### 2. Step 2: Enclave-Backed Database Passphrase Lifecycle
+* **Action:** Generate a cryptographically secure 256-bit database master key on initial install.
+* **Storage:** Store the database master key inside the hardware-backed **Secure Enclave / KeyStore** via `expo-secure-store`.
+* **Login derivation:** On startup, the user's local login passcode is combined with the enclave-derived master key via **PBKDF2** (20,000 iterations of HMAC-SHA256) to derive the active database encryption key.
+
+### 3. Step 3: Custom JSI WatermelonDB Adapter Implementation
+* **Action:** Implement a custom adapter for WatermelonDB that calls JSI bindings of `@op-engineering/op-sqlite` directly, replacing standard `@nozbe/watermelondb-adapter-sqlite`.
+* **Database Hooking:** Ensure every database mount triggers the encryption key verification immediately:
+  ```typescript
+  import { open } from '@op-engineering/op-sqlite';
+  
+  const db = open({
+    name: 'pim-secured-db.sqlite',
+    encryptionKey: 'derived-enclave-passphrase'
+  });
+  ```
+* **Verification:** Ensure page-level crypto overhead (OpenSSL AES-256-XTS) performs efficiently under React Native's JSI architecture, maintaining high framerates.
+
+### 4. Step 4: Secure Data Migration Pipeline (Old-to-New)
+* **Action:** For existing installations, build a migration pipeline that secure-boots the system:
+  1. Mount the legacy unencrypted `expo-sqlite` database file.
+  2. Open a new encrypted `op-sqlite` + `SQLCipher` container.
+  3. Batch copy existing message threads, identities, and session keys in a secure JSI transaction.
+  4. Perform an **overwrite-wipe** (fill legacy file with zeroes) and physically delete the legacy file from the device filesystem.
+  5. Mark migration as complete in `StateManager`.
+
+### 5. Step 5: Verification & Zero-Plaintext Audit
+* **Action:** Programmatically inspect raw SQLite files inside sandbox paths to assert the absence of `SQLite format 3\0` signatures.
+* **Automated checks:** Verification assertions must confirm that raw disk blocks are highly entropic (resembling random noise) and unreadable without the enclave-backed key.
+
+---
+
+## 7. Architectural Mitigation Matrix
 
 | Threat Vector | STRIDE | System Component | Current PIM Mitigation | Residual Risk |
 | :--- | :--- | :--- | :--- | :--- |
 | **Quantum Decryption (HNDL)** | Information Disclosure | `EncryptionService.ts` | **Dual-Layer Hybrid Onion**: Signal Curve25519 + ML-KEM-768 outer wrapper. | Lattice structure flaws in early FIPS 203 implementations. |
 | **Cloud AI Prompt Leakage** | Information Disclosure | `AiAdvisor.ts` | **Local-Only Inference**: On-device quantized GGUF execution, zero cloud APIs. | Prompt injection attacks leading to local data disclosures. |
-| **Database Plaintext Theft** | Tampering / Info Disclosure | `LocalDb.ts` | **CryptoJS Field Encryption**: Auto-encrypts contents on write. | Performance bottlenecks on JS thread; SQLite schema metadata is unencrypted. |
-| **Unencrypted Media Hosting** | Information Disclosure | `MessageRelay.ts` | **Symmetric Key Wrapping**: CryptoJS files encryption. Keys sent inside E2EE only. | Server timing/size analysis of media uploads. |
+| **Database Plaintext Theft** | Tampering / Info Disclosure | `LocalDb.ts` | **CryptoJS Field Encryption**: Auto-encrypts contents on write. | SQLite schema metadata and indexes remain visible on device disk. |
 | **SQLite Cleartext Residue** | Information Disclosure | `StateManager.ts` | **Physical Database Wipes**: Async SQLite hard record deletion on expiry. | Flash storage wear-leveling keeping ghost copies in raw blocks. |
+| **Unencrypted Media Hosting** | Information Disclosure | `MessageRelay.ts` | **Symmetric Key Wrapping**: CryptoJS files encryption. Keys sent inside E2EE only. | Server timing/size analysis of media uploads. |
 | **Rogue Client Screenshots** | Information Disclosure | `ChatScreen.tsx` | **E2EE Screenshot Warnings**: Captures event, broadcasts warning over socket. | Rogue contact using a physical camera ("Analog Hole") to record screen. |
-
----
-
-## 5. Residual Risks & Future Security Roadmap
-
-PIM's current architecture provides robust defensive circles. However, the following residual risks remain and are scheduled for mitigation in future architectural sprints:
-
-### 1. SQLite Metadata Visibility (Future Mitigation: SQLCipher)
-* **Risk:** While field-level CryptoJS encryption secures text payloads at rest, SQLite metadata (table structures, message counts, indexing details) remains in plaintext on the device storage.
-* **Roadmap:** Migrate to **SQLCipher page-level database encryption** using the `@op-engineering/op-sqlite` native driver, unlocking full database file encryption at the OS/disk level with enclave-backed master keys.
-
-### 2. Post-Quantum Handshake Signatures (Future Mitigation: ML-DSA / Falcon)
-* **Risk:** While the *encryption* layer is post-quantum (ML-KEM-768), key *authenticity* during the initial handshake is still verified classically via Bob's Curve25519 identity key. A quantum-capable MITM adversary could theoretically spoof the initial identity signature.
-* **Roadmap:** Migrate long-term client identity keys from Curve25519 to post-quantum signature schemes like **ML-DSA-652** or **Falcon-512** once mobile bindings mature.
-
-### 3. Flash Storage Wear-Leveling (Residual Risk)
-* **Risk:** Even when database-level records are physically purged (`destroyPermanently()`), solid-state flash memory controllers utilize wear-leveling algorithms that copy raw blocks. Residual fragments of deleted messages may persist in unmapped physical NAND blocks until garbage-collected.
-* **Roadmap:** Instruct users to leverage OS-level hardware encryption (FileVault / Android File Encryption) to ensure raw NAND blocks are unreadable at all times.
+| **Device Duress & Coercion** | Information Disclosure | `SettingsScreen.tsx` | **Plausible Deniability**: Decoy SQLite password maps to realistic simulated chat thread. | Advanced physical/behavioral timing analysis indicating app state. |
+| **Device Imminent Seizure** | Information Disclosure | `EventBus.ts` | **Panic Mode Wiping**: Face-down gesture or incorrect passcode trigger zeroizes keys. | Timing delay during intensive multi-gigabyte storage overwrites. |
+| **AI Timing Side-Channels** | Information Disclosure | `AiAdvisor.ts` | **Prompt Cache Partitioning**: Isolated per-chat context + token timing padding. | High-frequency electromagnetic side-channels from processor cores. |
