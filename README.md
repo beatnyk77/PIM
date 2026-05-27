@@ -50,6 +50,20 @@ npm install
 npx expo start
 ```
 
+### 3. Public Beta Installation
+For the initial public beta, we bypass traditional app stores to maintain independence from telemetry and review delays.
+1. Download the latest APK (Android) or IPA (iOS) from our GitHub Releases page.
+2. Install the application manually on your device.
+3. Upon first launch, the **Safety Check Wizard** will validate your cryptographic enclave and secure database mount.
+
+---
+
+## ⚠️ Known Limitations (Beta V1)
+1. **Background Socket Drops (iOS):** Due to aggressive iOS background task termination, long-lived WebSockets may drop when the app is backgrounded.
+2. **Local AI Memory Usage:** The `llama.rn` GGUF models require 2GB+ of free RAM. Older devices may experience thermal throttling or OOM crashes.
+3. **Lite Mode:** If you experience battery drain or crashes, enable **Lite Mode** in Settings. This completely disables local AI processing and uses lighter cryptographic padding.
+4. **Relay Uptime:** The default relay node is stateless and best-effort. Self-hosting the relay server is highly recommended for production-critical deployments.
+
 ---
 
 ## 🧪 Running Security & Integration Tests

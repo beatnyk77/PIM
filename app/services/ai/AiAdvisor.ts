@@ -113,6 +113,12 @@ class AiAdvisorService {
   }
 
   async initialize() {
+    const { settings } = useStore.getState();
+    if (settings.liteModeEnabled) {
+      console.log('AiAdvisor: Lite Mode enabled. Bypassing heavy AI initialization.');
+      return;
+    }
+
     if (this.context || this.isInitializing) return;
 
     this.isInitializing = true;
@@ -218,6 +224,11 @@ class AiAdvisorService {
   }
 
   async query(prompt: string): Promise<string> {
+    const { settings } = useStore.getState();
+    if (settings.liteModeEnabled) {
+      return "Lite Mode active: AI disabled.";
+    }
+
     if (!this.context) {
       console.warn('AiAdvisor: Model not initialized. Returning fallback.');
       return "Model not ready.";

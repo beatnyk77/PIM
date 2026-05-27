@@ -530,7 +530,11 @@ export class FullFlowTest {
             this.log('  - Key transfer payload successfully exported and AES-GCM wrapped.');
 
             // Import keys on simulated secondary device
-            const importRes = await IdentityService.importD2DTransferPayload(transferPayload, pin);
+            const decoded = await IdentityService.decodeD2DPayload(transferPayload, pin);
+            if (!decoded) {
+                throw new Error('D2D Transfer Payload decryption/decode failed');
+            }
+            const importRes = await IdentityService.confirmD2DImport(decoded.rawPayload);
             if (!importRes) {
                 throw new Error('D2D Transfer Payload import failed');
             }

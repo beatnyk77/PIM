@@ -2,6 +2,7 @@ import * as Signal from '@privacyresearch/libsignal-protocol-typescript';
 import { IdentityService, arrayBufferToBase64, base64ToArrayBuffer } from '../auth/IdentityService';
 import { getSignalStoreValue, saveSignalStoreValue, deleteSignalStoreValue, getGroupSenderKeyFromDb, saveGroupSenderKeyToDb } from '../storage/LocalDb';
 import { createMlKem768 } from 'mlkem';
+import { useStore } from '../storage/StateManager';
 
 import CryptoJS from 'crypto-js';
 
@@ -29,7 +30,17 @@ function decryptSymmetric(ciphertext: string, hexKey: string, ivHex: string): st
 }
 
 export function padPlaintext(text: string): string {
+  const { settings } = useStore.getState();
   const len = text.length;
+
+  if (settings.liteModeEnabled) {
+    // Fast path: Only pad to the nearest 16-byte boundary to reduce payload size and crypto cycles.
+    const targetSize = Math.ceil((len + 1) / 16) * 16;
+    const paddingLength = Math.max(0, targetSize - len - 1);
+    const dummyPadding = CryptoJS.lib.WordArray.random(paddingLength).toString(CryptoJS.enc.Hex).substring(0, paddingLength);
+    return text + '\0' + dummyPadding;
+  }
+
   const buckets = [256, 1024, 4096];
   const possibleBuckets = buckets.filter(b => b >= len + 1);
   let targetSize = 4096;

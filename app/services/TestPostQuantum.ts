@@ -18,6 +18,7 @@ export async function runPostQuantumIntegrationTest(): Promise<boolean> {
     console.log('2. Generating long-term classical and post-quantum keys for Bob...');
     const bobClassicKeys = {
       registrationId: 4321,
+      deviceId: 1,
       identityKey: aliceClassicKeys.identityKey, // mock for local execution
       privateKey: aliceClassicKeys.privateKey,
     };

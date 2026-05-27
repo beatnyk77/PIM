@@ -23,6 +23,8 @@ export interface AppSettings {
   panicGestureEnabled: boolean;
   decoyVaultEnabled: boolean;
   practiceModeEnabled: boolean;
+  liteModeEnabled: boolean;
+  safetyCheckCompleted: boolean;
 }
 
 interface AppState {
@@ -53,6 +55,8 @@ export const useStore = create<AppState>((set, get) => ({
     panicGestureEnabled: false,
     decoyVaultEnabled: false,
     practiceModeEnabled: false,
+    liteModeEnabled: false,
+    safetyCheckCompleted: false,
   },
   setActiveChat: (chatId) => set({ activeChat: chatId, activeGroup: null }),
   setActiveGroup: (groupId) => set({ activeGroup: groupId, activeChat: null }),

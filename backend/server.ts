@@ -16,8 +16,8 @@ const io = new Server(httpServer, {
 
 const PORT = process.env.PORT || 3000;
 
-// Store connected users: userId -> socketId
-const connectedUsers = new Map<string, string>();
+// Store connected users: userId -> Set of socketIds (for multi-device)
+const connectedUsers = new Map<string, Set<string>>();
 
 // Key Registry: userId -> KeyBundle
 const keyRegistry = new Map<string, any>();
@@ -37,12 +37,22 @@ io.on('connection', (socket: Socket) => {
 
   console.log(`[Connection] User connected: ${userId} (Socket ID: ${socket.id})`);
   
-  // Store mapping
-  connectedUsers.set(userId, socket.id);
+  socket.join(userId);
+
+  if (!connectedUsers.has(userId)) {
+    connectedUsers.set(userId, new Set());
+  }
+  connectedUsers.get(userId)!.add(socket.id);
 
   socket.on('disconnect', () => {
-    console.log(`[Disconnect] User disconnected: ${userId}`);
-    connectedUsers.delete(userId);
+    console.log(`[Disconnect] User disconnected: ${userId} (Socket ID: ${socket.id})`);
+    const sockets = connectedUsers.get(userId);
+    if (sockets) {
+      sockets.delete(socket.id);
+      if (sockets.size === 0) {
+        connectedUsers.delete(userId);
+      }
+    }
     // Clean up active anonymous routing tokens for this socket
     for (const [token, socketId] of tokenRoutingRegistry.entries()) {
       if (socketId === socket.id) {
@@ -88,10 +98,7 @@ io.on('connection', (socket: Socket) => {
         // Proactively notify user Bob if his prekey pool is running low (below 20 keys)
         if (bundle.preKeys.length < 20) {
           console.log(`[Keys] User ${targetUserId} prekeys pool running low (${bundle.preKeys.length}). Dispatching replenish alert.`);
-          const targetSocketId = connectedUsers.get(targetUserId);
-          if (targetSocketId) {
-            io.to(targetSocketId).emit('replenish-keys', { remaining: bundle.preKeys.length });
-          }
+          io.to(targetUserId).emit('replenish-keys', { remaining: bundle.preKeys.length });
         }
       }
 
@@ -115,8 +122,7 @@ io.on('connection', (socket: Socket) => {
     console.log(`[Message] From ${userId}:`, data);
     // Echo back for now or forward if 'to' exists
     if (data.to && connectedUsers.has(data.to)) {
-      const targetSocketId = connectedUsers.get(data.to);
-      io.to(targetSocketId!).emit('message', { ...data, from: userId });
+      io.to(data.to).emit('message', { ...data, from: userId });
     }
   });
 
@@ -133,8 +139,7 @@ io.on('connection', (socket: Socket) => {
     console.log(`[Chat] Relaying secure message from ${userId} to ${to}`);
 
     if (connectedUsers.has(to)) {
-      const targetSocketId = connectedUsers.get(to);
-      io.to(targetSocketId!).emit('chat-message', {
+      io.to(to).emit('chat-message', {
         from: userId,
         ciphertext,
         timestamp,
@@ -150,8 +155,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('read-receipt', (data: any) => {
       const { to, messageId } = data;
       if (to && connectedUsers.has(to)) {
-          const targetSocketId = connectedUsers.get(to);
-          io.to(targetSocketId!).emit('read-receipt', {
+          io.to(to).emit('read-receipt', {
               from: userId,
               messageId
           });

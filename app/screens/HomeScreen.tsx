@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { IdentityService } from '../services/auth/IdentityService';
 import { MessageRelay } from '../services/messaging/MessageRelay';
 import { EventBus } from '../services/EventBus';
+import { SafetyCheckWizard } from '../components/SafetyCheckWizard';
 
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
@@ -105,6 +106,8 @@ export default function HomeScreen() {
       >
           <Text className="text-white text-2xl">+</Text>
       </TouchableOpacity>
+
+      <SafetyCheckWizard />
     </SafeAreaView>
   );
 }

@@ -143,6 +143,19 @@ export default function SettingsScreen() {
           />
         </View>
 
+        <Text className="text-lg font-bold mb-4 mt-4 text-gray-800">Device Optimization</Text>
+        
+        <View className="flex-row justify-between items-center mb-6">
+          <View className="flex-1 mr-4">
+            <Text className="text-base font-semibold">Lite Mode (Performance/Battery Saver)</Text>
+            <Text className="text-gray-500 text-sm">Disables heavy local AI and uses smaller cryptographic padding buckets to save RAM and battery on older devices.</Text>
+          </View>
+          <Switch
+            value={settings.liteModeEnabled}
+            onValueChange={() => toggleSwitch('liteModeEnabled')}
+          />
+        </View>
+
         <Text className="text-lg font-bold mb-4 mt-4 text-gray-800">Privacy</Text>
 
         <View className="flex-row justify-between items-center mb-6">
@@ -234,6 +247,15 @@ export default function SettingsScreen() {
         </View>
 
         <Text className="text-lg font-bold mb-4 mt-4 text-gray-800">Multi-Device Synchronizations</Text>
+        
+        <View className="bg-gray-50 p-4 rounded-xl mb-6 border border-gray-200">
+            <Text className="text-base font-semibold mb-2">Linked Devices</Text>
+            <Text className="text-gray-500 text-sm mb-4">Manage trusted secondary devices. Revoking a device will bump the revocation epoch and cryptographically block it from accessing new incoming E2EE messages.</Text>
+            
+            <TouchableOpacity className="bg-blue-600 py-3 rounded-lg items-center">
+                <Text className="text-white font-bold">Manage Linked Devices</Text>
+            </TouchableOpacity>
+        </View>
 
         <View className="bg-gray-50 p-4 rounded-xl mb-6 border border-gray-200">
           <Text className="text-gray-800 font-bold mb-1 text-sm">🔄 P2P KEY EXCHANGE WIZARD</Text>
@@ -266,11 +288,16 @@ export default function SettingsScreen() {
                 const mockPin = '123456';
                 const mockPayload = await IdentityService.generateD2DTransferPayload(mockPin);
                 if (mockPayload) {
-                  const success = await IdentityService.importD2DTransferPayload(mockPayload, mockPin);
-                  if (success) {
-                    Alert.alert("Success", "E2EE and hybrid post-quantum identity keys successfully imported onto this secondary device! Isolated ratchets instantiated.");
+                  const decoded = await IdentityService.decodeD2DPayload(mockPayload, mockPin);
+                  if (decoded) {
+                    const success = await IdentityService.confirmD2DImport(decoded.rawPayload);
+                    if (success) {
+                      Alert.alert("Success", "E2EE and hybrid post-quantum identity keys successfully imported onto this secondary device! Isolated ratchets instantiated.");
+                    } else {
+                      Alert.alert("Error", "Key import confirmation failed.");
+                    }
                   } else {
-                    Alert.alert("Error", "Key decryption or import failed.");
+                    Alert.alert("Error", "Key decryption failed.");
                   }
                 }
               }}
