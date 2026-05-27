@@ -41,6 +41,18 @@ export default function SettingsScreen() {
     );
   };
 
+  const toggleSuspend = async (deviceId: number, nickname: string, currentlySuspended: boolean) => {
+    const nextState = !currentlySuspended;
+    const success = await IdentityService.suspendDevice(deviceId, nextState);
+    if (success) {
+      Alert.alert("Success", `'${nickname}' has been ${nextState ? 'suspended' : 'unsuspended'}.`);
+      const updated = await IdentityService.getLinkedDevices();
+      setLinkedDevices(updated);
+    } else {
+      Alert.alert("Error", "Failed to update device status.");
+    }
+  };
+
   const toggleSwitch = (key: keyof typeof settings) => {
     updateSettings({ [key]: !settings[key] });
   };
@@ -142,6 +154,26 @@ export default function SettingsScreen() {
   };
 
   if (showLinkedDevicesScreen) {
+    const getPlatformIcon = (platform?: string) => {
+      switch (platform) {
+        case 'ios': return '🍎';
+        case 'android': return '🤖';
+        case 'desktop': return '💻';
+        case 'web': return '🌐';
+        default: return '📱';
+      }
+    };
+
+    const getPlatformName = (platform?: string) => {
+      switch (platform) {
+        case 'ios': return 'iOS / Apple Device';
+        case 'android': return 'Android Device';
+        case 'desktop': return 'Desktop Client';
+        case 'web': return 'Web Session';
+        default: return 'Mobile Client';
+      }
+    };
+
     return (
       <SafeAreaView className="flex-1 bg-white">
         <View className="p-4 border-b border-gray-200 flex-row items-center justify-between">
@@ -165,22 +197,28 @@ export default function SettingsScreen() {
           {linkedDevices.map((dev) => {
             const isPrimary = dev.deviceId === 1;
             const isRevoked = !!dev.revocationEpoch;
+            const isSuspended = !!dev.isSuspended;
             const safetyNumber = IdentityService.generateD2DSafetyNumber(
               base64ToArrayBuffer(dev.publicKey || 'AAAA'),
               base64ToArrayBuffer(dev.publicKey || 'AAAA')
             );
 
             return (
-              <View key={dev.deviceId} className={`p-4 rounded-xl mb-4 border ${isRevoked ? 'bg-gray-50 border-gray-200 opacity-60' : 'bg-white border-gray-200 shadow-sm'}`}>
+              <View key={dev.deviceId} className={`p-4 rounded-xl mb-4 border ${isRevoked ? 'bg-gray-50 border-gray-200 opacity-60' : isSuspended ? 'bg-orange-50 border-orange-200' : 'bg-white border-gray-200 shadow-sm'}`}>
                 <View className="flex-row justify-between items-start mb-2">
                   <View className="flex-1 mr-2">
-                    <View className="flex-row items-center">
-                      <Text className={`text-base font-bold ${isRevoked ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
-                        {dev.nickname || `Device #${dev.deviceId}`}
+                    <View className="flex-row items-center flex-wrap">
+                      <Text className={`text-base font-bold ${isRevoked ? 'text-gray-400 line-through' : isSuspended ? 'text-orange-950 font-extrabold' : 'text-gray-900'}`}>
+                        {getPlatformIcon(dev.platform)} {dev.nickname || `Device #${dev.deviceId}`}
                       </Text>
                       {isPrimary && (
                         <View className="bg-blue-100 px-2 py-0.5 rounded ml-2">
                           <Text className="text-blue-800 text-xs font-semibold">Primary</Text>
+                        </View>
+                      )}
+                      {isSuspended && !isRevoked && (
+                        <View className="bg-orange-200 px-2 py-0.5 rounded ml-2">
+                          <Text className="text-orange-900 text-xs font-semibold">Suspended</Text>
                         </View>
                       )}
                       {isRevoked && (
@@ -189,21 +227,35 @@ export default function SettingsScreen() {
                         </View>
                       )}
                     </View>
-                    <Text className="text-gray-500 text-xs mt-1">
+                    <Text className="text-gray-500 text-xs mt-1.5">
+                      Platform: {getPlatformName(dev.platform)}
+                    </Text>
+                    <Text className="text-gray-500 text-xs mt-0.5">
                       Device ID: {dev.deviceId} • Added: {new Date(dev.addedAt).toLocaleDateString()}
                     </Text>
                     <Text className="text-gray-500 text-xs mt-0.5">
-                      Last Active: {dev.lastActive ? new Date(dev.lastActive).toLocaleTimeString() : 'Unknown'}
+                      Last Active: {dev.lastActive ? new Date(dev.lastActive).toLocaleString() : 'Unknown'}
                     </Text>
                   </View>
 
                   {!isPrimary && !isRevoked && (
-                    <TouchableOpacity
-                      onPress={() => confirmRevocation(dev.deviceId, dev.nickname || `Device #${dev.deviceId}`)}
-                      className="bg-red-50 border border-red-200 px-3 py-1.5 rounded-lg"
-                    >
-                      <Text className="text-red-600 font-semibold text-xs">Revoke</Text>
-                    </TouchableOpacity>
+                    <View className="flex-row items-center">
+                      <TouchableOpacity
+                        onPress={() => toggleSuspend(dev.deviceId, dev.nickname || `Device #${dev.deviceId}`, isSuspended)}
+                        className={`px-2.5 py-1.5 rounded-lg border ${isSuspended ? 'bg-orange-100 border-orange-300' : 'bg-gray-100 border-gray-300'}`}
+                      >
+                        <Text className={`${isSuspended ? 'text-orange-900' : 'text-gray-700'} font-semibold text-xs`}>
+                          {isSuspended ? 'Unsuspend' : 'Suspend'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => confirmRevocation(dev.deviceId, dev.nickname || `Device #${dev.deviceId}`)}
+                        className="bg-red-50 border border-red-200 px-2.5 py-1.5 rounded-lg ml-2"
+                      >
+                        <Text className="text-red-600 font-semibold text-xs">Revoke</Text>
+                      </TouchableOpacity>
+                    </View>
                   )}
                 </View>
 

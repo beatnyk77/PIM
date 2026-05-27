@@ -118,3 +118,18 @@ ssenger/
 - **Build/Distribution**: EAS Build (cloud builds) → TestFlight/Google Play Internal.
 
 This stack delivers maximum privacy, performance, and human agency on native mobile. Local AI will feel instantaneous on modern devices (A17 Pro / Snapdragon 8 Gen 3+). Build iteratively—start with messaging + encryption, layer AI. Excited for your progress!
+
+## Multi-Device Security Model & Cryptographic Revocation
+
+PIM features a state-of-the-art **Device-to-Device (D2D) Cryptographic Co-Residency** architecture designed to sync keys securely across trusted platforms without weakening forward secrecy.
+
+### 1. Root Identity Key Inheritance
+- **Shared Identity, Isolated Ephemerals:** Trusted secondary devices share the primary's Curve25519 root identity key pair (classical) and ML-KEM-768 key pair (post-quantum) to preserve a consistent user identity and safety number footprint.
+- **Independent Ratchets:** Ephemeral ratcheting and prekey pools remain fully isolated per device. Each device runs its own Signal session, preventing double-decryption failures and securing individual forward secrecy.
+
+### 2. Active Cryptographic Revocation
+- **Epoch Bumping:** When revoking a secondary device, the primary device locally increments the revocation epoch for that device and signs it with the root identity private key.
+- **Signed Epoch Broadcasts:** The signed epoch update is automatically broadcasted over End-to-End Encrypted (E2EE) channels to all active contacts.
+- **Verification & Filtering:** Contacts verify the broadcast signature against the primary's known public key and store the epoch. Any future messages originating from or targeted to the revoked device ID are cryptographically blocked.
+- **Periodic Catch-Up Re-Broadcast:** Because contacts may be offline when a revocation occurs, PIM runs a periodic background task to re-broadcast active revocation epochs, guaranteeing eventual propagation.
+- **Local Suspend Option:** Users can temporarily "suspend" a device to locally freeze synchronizations and imports on that terminal without triggering a permanent network-wide revocation.

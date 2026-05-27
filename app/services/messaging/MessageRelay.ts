@@ -17,6 +17,7 @@ class MessageRelayService {
   private socket: Socket | null = null;
   private serverUrl: string = 'http://localhost:3000'; 
   private dummyInterval: any = null;
+  private revocationRebroadcastInterval: any = null;
 
   connect(userId: string) {
     if (this.socket?.connected) return;
@@ -51,6 +52,9 @@ class MessageRelayService {
       // Start periodic randomized dummy packets background stream
       this.startDummyPacketNoise();
 
+      // Start periodic re-broadcast of latest revocation epochs
+      this.startRevocationRebroadcast();
+
       // Listen for E2EE keys replenishment requests
       this.socket!.on('replenish-keys', async (data: any) => {
         console.log(`MessageRelay: Server reports E2EE prekeys running low (${data.remaining}). Replenishing pool...`);
@@ -64,6 +68,10 @@ class MessageRelayService {
       if (this.dummyInterval) {
         clearInterval(this.dummyInterval);
         this.dummyInterval = null;
+      }
+      if (this.revocationRebroadcastInterval) {
+        clearInterval(this.revocationRebroadcastInterval);
+        this.revocationRebroadcastInterval = null;
       }
     });
 
@@ -512,6 +520,19 @@ class MessageRelayService {
         }, Math.random() * 200 + 50);
       }
     }, 25000);
+  }
+
+  startRevocationRebroadcast() {
+    if (this.revocationRebroadcastInterval) {
+      clearInterval(this.revocationRebroadcastInterval);
+    }
+    // Re-broadcast immediately on connection establishment
+    IdentityService.rebroadcastRevocations().catch(e => console.error('[MessageRelay] Failed to rebroadcast revocations:', e));
+
+    // Periodically run every 15 minutes (or 5 seconds in E2E tests, which we can trigger or mock)
+    this.revocationRebroadcastInterval = setInterval(() => {
+      IdentityService.rebroadcastRevocations().catch(e => console.error('[MessageRelay] Periodic rebroadcast failed:', e));
+    }, 15 * 60 * 1000);
   }
 
   // --- Volatile Key Bundle links ---

@@ -624,6 +624,59 @@ export class FullFlowTest {
             // Clean up revocation for the test
             await SecureStore.deleteItemAsync('contact_revocations_v1');
 
+            // 5. Validate Offline Revocation Propagation Safety Checks
+            this.log('5. Testing Offline Revocation Propagation Safety Checks...');
+            
+            // Setup a contact list containing a mock offline contact and active contact
+            const originalContacts = (IdentityService as any).getContacts;
+            (IdentityService as any).getContacts = async () => ['offline-bob-contact', 'active-alice-contact'];
+            
+            // Mock MessageRelay's sendSecureMessage to simulate an offline queueing / logging behavior
+            const sentPayloads: { recipient: string, payload: string }[] = [];
+            const originalSend = MessageRelay.sendSecureMessage;
+            MessageRelay.sendSecureMessage = async (recipient: string, payload: string) => {
+                sentPayloads.push({ recipient, payload });
+                return true;
+            };
+            
+            // Mark device 99 as revoked (which triggers revokeDevice and signs epoch broadcast)
+            this.log('  - Initiating revocation of Device 99 offline...');
+            const revokeRes = await IdentityService.revokeDevice(99);
+            if (!revokeRes) throw new Error('Offline device revocation failed');
+            
+            // Verify that revocation E2EE packets were dispatched to our contacts
+            const bobPayload = sentPayloads.find(p => p.recipient === 'offline-bob-contact');
+            const alicePayload = sentPayloads.find(p => p.recipient === 'active-alice-contact');
+            if (!bobPayload || !alicePayload) {
+                throw new Error('E2EE Revocation packets failed to dispatch to contact roster!');
+            }
+            
+            const parsedBob = JSON.parse(bobPayload.payload);
+            if (parsedBob.type !== 'device-revocation' || parsedBob.revokedDeviceId !== 99) {
+                throw new Error('Invalid revocation packet dispatched');
+            }
+            this.log('  - Verified E2EE revocation packets dispatched to contacts during active revocation!');
+            
+            // Clear sent log
+            sentPayloads.length = 0;
+            
+            // Now trigger periodic re-broadcast to simulate reconnect and catch-up syncing for offline contacts
+            this.log('  - Simulating network reconnection catch-up (periodic re-broadcast)...');
+            await IdentityService.rebroadcastRevocations();
+            
+            // Verify that the re-broadcast successfully sent the packets again
+            const rebroadcastBob = sentPayloads.find(p => p.recipient === 'offline-bob-contact');
+            if (!rebroadcastBob) {
+                throw new Error('Re-broadcast failed to dispatch revocation catch-up packets to offline contact!');
+            }
+            this.log('  - Success! Catch-up revocation packets successfully propagated to offline contact!');
+            
+            // Restore all original methods and clean up
+            (IdentityService as any).getContacts = originalContacts;
+            MessageRelay.sendSecureMessage = originalSend;
+            await SecureStore.deleteItemAsync('linked_devices_v1'); // reset state
+            await SecureStore.deleteItemAsync('contact_revocations_v1');
+
             this.log('✅ Active Multi-Device Signed Revocation protocol successfully validated!');
             this.log('✅ Automated Threat Model E2E Test Suite completed successfully!');
             console.log('==================================================\n');

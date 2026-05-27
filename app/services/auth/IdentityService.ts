@@ -66,6 +66,8 @@ export interface LinkedDevice {
   nickname?: string;
   lastActive?: number;
   revocationEpoch?: number;
+  isSuspended?: boolean;
+  platform?: 'ios' | 'android' | 'desktop' | 'web';
 }
 
 const STORAGE_KEY = 'identity_keys_v1';
@@ -425,7 +427,8 @@ export class IdentityService {
           publicKey: primaryPub,
           addedAt: Date.now() - 30 * 24 * 3600 * 1000,
           nickname: 'Primary iPhone (This Device)',
-          lastActive: Date.now()
+          lastActive: Date.now(),
+          platform: 'ios'
         });
         await SecureStore.setItemAsync('linked_devices_v1', JSON.stringify(list));
       }
@@ -437,7 +440,16 @@ export class IdentityService {
           publicKey: 'MOCK_SECONDARY_PUBKEY_BASE64_FINGERPRINT_DATA_VAL_45',
           addedAt: Date.now() - 5 * 24 * 3600 * 1000,
           nickname: "Bob's iPad Pro",
-          lastActive: Date.now() - 3600 * 1000
+          lastActive: Date.now() - 3600 * 1000,
+          platform: 'ios'
+        });
+        list.push({
+          deviceId: 99,
+          publicKey: 'MOCK_SECONDARY_PUBKEY_BASE64_FINGERPRINT_DATA_VAL_99',
+          addedAt: Date.now() - 12 * 24 * 3600 * 1000,
+          nickname: "Linux Desktop Workstation",
+          lastActive: Date.now() - 24 * 3600 * 1000,
+          platform: 'desktop'
         });
         await SecureStore.setItemAsync('linked_devices_v1', JSON.stringify(list));
       }
@@ -630,6 +642,48 @@ export class IdentityService {
       console.log(`[IdentityService] Saved validated revocation epoch ${epoch} for contact ${contactUserId} device ${deviceId}`);
     } catch (e) {
       console.error('[IdentityService] Failed to save contact revocation epoch', e);
+    }
+  }
+
+  static async suspendDevice(deviceId: number, suspend: boolean): Promise<boolean> {
+    try {
+      const devices = await this.getLinkedDevices();
+      const updated = devices.map(d => d.deviceId === deviceId ? { ...d, isSuspended: suspend } : d);
+      await SecureStore.setItemAsync('linked_devices_v1', JSON.stringify(updated));
+      console.log(`[D2D Sync] Device ${deviceId} suspended status set to ${suspend}.`);
+      return true;
+    } catch (e) {
+      console.error('[D2D Sync] Failed to suspend/unsuspend device', e);
+      return false;
+    }
+  }
+
+  static async rebroadcastRevocations(): Promise<void> {
+    try {
+      const devices = await this.getLinkedDevices();
+      const revokedDevices = devices.filter(d => !!d.revocationEpoch);
+      if (revokedDevices.length === 0) return;
+
+      console.log(`[D2D Sync] Periodic re-broadcast: Found ${revokedDevices.length} revoked devices. Re-broadcasting latest epochs...`);
+      const { MessageRelay } = require('../messaging/MessageRelay');
+      const contacts = await this.getContacts();
+
+      for (const dev of revokedDevices) {
+        const signature = await this.signRevocationEpoch(dev.deviceId, dev.revocationEpoch!);
+        if (signature) {
+          for (const contactId of contacts) {
+            const payload = JSON.stringify({
+              type: 'device-revocation',
+              revokedDeviceId: dev.deviceId,
+              revocationEpoch: dev.revocationEpoch,
+              signature: signature
+            });
+            await MessageRelay.sendSecureMessage(contactId, payload);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[IdentityService] Failed to rebroadcast revocations:', e);
     }
   }
 

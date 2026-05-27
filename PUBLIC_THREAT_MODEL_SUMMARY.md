@@ -19,3 +19,11 @@ At **Private Intelligence Messenger (PIM)**, we built a system that fundamentall
 ## 4. Spying AI
 **The Threat:** Cloud-based AI assistants (like ChatGPT) send your private chats to corporate servers to generate replies or summaries.
 **Our Defense:** PIM's AI runs 100% locally on your phone's processor. It works in airplane mode. Your data never leaves your device.
+
+## 5. Companion Device Theft
+**The Threat:** You lose a linked iPad or laptop, or someone steals it, potentially allowing them to read future incoming messages.
+**Our Defense:**
+* **Cryptographic Blocklisting (Revocation):** From your primary phone, you can instantly revoke any companion device. PIM signs a "revocation notice" using your private identity key and automatically broadcasts it to all your contacts.
+* **Immediate Lock-Out:** Your contacts' apps verify the digital signature and instantly block the stolen device. It is cryptographically barred from receiving or decrypting any future messages.
+* **Offline Catch-Up:** Even if your contacts are offline when you revoke the device, PIM's background synchronization will update them the absolute second they reconnect.
+* **Temporary Suspension:** Not sure if you just misplaced your companion device? "Suspend" it locally with a single tap to freeze its sync capabilities until you find it.
