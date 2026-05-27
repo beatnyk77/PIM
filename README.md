@@ -10,8 +10,9 @@
 *   **SQLCipher page-level Database Encryption:** Local storage is page-encrypted via `@op-engineering/op-sqlite` using AES-256-XTS with Enclave-backed PBKDF2 derived passphrases.
 *   **Metadata-Routing Token Batches:** Eliminates persistent `userId` fields from active packet headers. Messages are routed anonymously using pre-shared, single-use token queues that the server wipes instantly post-delivery.
 *   **Plausible Deniability Decoy Vaults:** Dual-passphrase unlocking mounts a completely separate decoy SQLite instance (`pim-decoy-db.sqlite`) populated with benign simulated work threads, hiding your actual secure container (`pim-secured-db.sqlite`).
-*   **Panic Mode Wiping Gesture:**Accelerometer face-down flips or failed passcode thresholds execute high-priority zeroization, erasing Secure Enclave key materials, binary-scrubbing SQLite databases, and hard-exiting immediately.
+*   **Panic Mode Wiping Gesture:** Accelerometer face-down flips or failed passcode thresholds execute high-priority zeroization, erasing Secure Enclave key materials, binary-scrubbing SQLite databases, and hard-exiting immediately.
 *   **Local-Only AI (Timing Shielded):** Quantized LLM execution (`llama.rn`) is protected by system role exploit sanitizers and random timing noise token padding to prevent CPU/GPUTiming attacks.
+*   **Cryptographic Multi-Device Sync:** Seamlessly link multiple devices with forward secrecy preserved across all endpoints. Device revocation broadcasts signed epoch blocks to instantly purge compromised instances from contact networks.
 
 ---
 
