@@ -291,6 +291,17 @@ export async function initializeSecureDb(passphrase: string, isDecoy: boolean = 
           encryptionKey: derivedKey
         });
         
+        // Performance Tuning passes on SQLCipher native DB instance
+        try {
+          nativeDb.execute("PRAGMA page_size = 4096;");
+          nativeDb.execute("PRAGMA journal_mode = WAL;");
+          nativeDb.execute("PRAGMA mmap_size = 268435456;"); // 256MB memory mapping
+          nativeDb.execute("PRAGMA cache_size = -2000;");    // 2MB cache allocation
+          console.log('[Performance] Optimal SQLCipher page and mmap settings applied successfully.');
+        } catch (pragmaErr: any) {
+          console.warn('[Performance] Failed to apply optimized SQLCipher PRAGMA configurations:', pragmaErr.message);
+        }
+        
         activeAdapter = new SQLiteAdapter({
           schema: mySchema,
           jsi: true,
@@ -415,6 +426,19 @@ export async function populateDecoyDatabase(): Promise<void> {
 export async function executeAppZeroization(): Promise<boolean> {
   try {
     console.warn('⚠️ [ZEROIZATION ENGINE] DETECTED PANIC INSTRUCTION. EXECUTING SECURE WIPES...');
+
+    // Practice Mode Bypass check
+    try {
+      const { useStore } = require('./StateManager');
+      const { settings } = useStore.getState();
+      if (settings && settings.practiceModeEnabled) {
+        console.warn('⚠️ [ZEROIZATION ENGINE] BYPASSING ACTUAL DATA PURGE: PRACTICE MODE ACTIVE!');
+        console.log('✅ [ZEROIZATION ENGINE] Practice simulated successfully. Real data preserved.');
+        return true;
+      }
+    } catch (storeErr) {
+      // Continue normal purge if store is unavailable
+    }
 
     // 1. Wipe Enclave Keys and Salts
     console.log('[Zeroization] Wiping Secure Enclave keys and salts...');

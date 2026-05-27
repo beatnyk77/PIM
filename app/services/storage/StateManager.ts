@@ -22,6 +22,7 @@ export interface AppSettings {
   defaultSelfDestructTime: number; // in seconds, 0 = off
   panicGestureEnabled: boolean;
   decoyVaultEnabled: boolean;
+  practiceModeEnabled: boolean;
 }
 
 interface AppState {
@@ -51,6 +52,7 @@ export const useStore = create<AppState>((set, get) => ({
     defaultSelfDestructTime: 0,
     panicGestureEnabled: false,
     decoyVaultEnabled: false,
+    practiceModeEnabled: false,
   },
   setActiveChat: (chatId) => set({ activeChat: chatId, activeGroup: null }),
   setActiveGroup: (groupId) => set({ activeGroup: groupId, activeChat: null }),

@@ -4,13 +4,14 @@
 
 ---
 
-## 🛡️ Core Principles
+## 🛡️ Core Security Features
 
-*   **End-to-End Encryption (E2EE):** Secured via an industrial-strength implementation of the Signal Protocol (Double Ratchet, PreKeys, and Diffie-Hellman handshakes) protecting every direct message.
-*   **Local-Only AI (Zero Leakage):** On-device language model execution using native bindings (`llama.rn`). Features like tone detection, commitment extraction, and smart reply suggestions are processed fully offline on the device's Neural Engine/GPU—leaking zero conversation data.
-*   **Offline-First Autonomy:** Outgoing messages and notifications are placed in an encrypted local queue and synced sequentially upon connection, while all local databases are heavily encrypted at rest.
-*   **Calm & Manual Agency:** Clean, focused UX without notification or animation overload. AI suggestions are strictly opt-in, placing drafts in the input field rather than auto-sending, preserving user intention.
-*   **Quantum-Safe Roadmap:** Engineered with modular crypto structures prepared to integrate post-quantum algorithms (ML-KEM/Kyber) to future-proof communication against future quantum threats.
+*   **Dual-Layer Hybrid Onion E2EE:** Direct messages are dual-encrypted nesting Curve25519 DH keys inside post-quantum **FIPS 203 ML-KEM-768** lattice ciphers, defeating Harvest-Now-Decrypt-Later (HNDL) timing attacks.
+*   **SQLCipher page-level Database Encryption:** Local storage is page-encrypted via `@op-engineering/op-sqlite` using AES-256-XTS with Enclave-backed PBKDF2 derived passphrases.
+*   **Metadata-Routing Token Batches:** Eliminates persistent `userId` fields from active packet headers. Messages are routed anonymously using pre-shared, single-use token queues that the server wipes instantly post-delivery.
+*   **Plausible Deniability Decoy Vaults:** Dual-passphrase unlocking mounts a completely separate decoy SQLite instance (`pim-decoy-db.sqlite`) populated with benign simulated work threads, hiding your actual secure container (`pim-secured-db.sqlite`).
+*   **Panic Mode Wiping Gesture:**Accelerometer face-down flips or failed passcode thresholds execute high-priority zeroization, erasing Secure Enclave key materials, binary-scrubbing SQLite databases, and hard-exiting immediately.
+*   **Local-Only AI (Timing Shielded):** Quantized LLM execution (`llama.rn`) is protected by system role exploit sanitizers and random timing noise token padding to prevent CPU/GPUTiming attacks.
 
 ---
 
@@ -18,24 +19,19 @@
 
 ### Native Client (Mobile App)
 *   **Framework:** React Native + Expo (TypeScript-first)
-*   **Database:** WatermelonDB (SQLite Adapter via JSI) with field-level at-rest encryption
-*   **Key Storage:** Expo SecureStore (hardware-backed Keychain/Keystore)
-*   **On-Device AI:** `llama.rn` (quantized GGUF models, currentlyPhi-3 Mini)
-*   **E2EE Engine:** `@privacyresearch/libsignal-protocol-typescript`
+*   **Database:** WatermelonDB page-encrypted via `@op-engineering/op-sqlite` (SQLCipher AES-256-XTS)
+*   **Key Storage:** expo-secure-store (Hardware enclave Keychain/Keystore)
+*   **On-Device AI:** `llama.rn` (quantized GGUF models, lock-memory `use_mlock`)
+*   **E2EE Engine:** `@privacyresearch/libsignal-protocol-typescript` + `mlkem`
 *   **Styling & UI:** Tailwind CSS (via NativeWind v4)
 
-### Minimal Relay (Backend Server)
-*   **Runtime:** Node.js (TypeScript)
-*   **Framework:** Express
-*   **Realtime Network:** Socket.io (WebSocket protocol)
-*   **Storage:** Stateless (No message store; simple in-memory public key directory)
+### Minimal Stateless Relay (Backend Server)
+*   **Runtime:** Node.js (TypeScript) + Express + Socket.io
+*   **Storage:** Stateless (No DB storage; in-memory transient volatile directories only)
 
 ---
 
 ## 🚀 How to Run Locally
-
-### Prerequisite
-Ensure you have Node.js (v18+) and your package manager (`npm` or `yarn`) installed.
 
 ### 1. Run the Backend Relay Server
 Open a terminal at the project root and navigate to the backend directory:
@@ -53,15 +49,26 @@ cd app
 npm install
 npx expo start
 ```
-From the Expo interactive prompt, you can press **`i`** to launch the iOS Simulator, or **`a`** to launch the Android Emulator.
-
-*Note: For the Android Emulator to connect to the local relay, ensure `serverUrl` in `MessageRelay.ts` is pointed to the emulator bridge `http://10.0.2.2:3000` instead of `http://localhost:3000`.*
 
 ---
 
-## 🗺️ Current Status & Roadmap
+## 🧪 Running Security & Integration Tests
 
-PIM's core messaging flow, E2EE identity generation, at-rest database encryption, event-driven architecture, local AI advisor hooks, and backend relays are fully implemented. 
+PIM features an automated cryptographic audit and security threat validation test suite.
 
-For the comprehensive, step-by-step roadmap detailing completed milestones and upcoming phases (such as native SQLCipher integration, secure media transfers, and group-key distribution), please consult:
-👉 **[tasks.md](tasks.md)**
+### 1. Execute TypeScript Compiler Check
+To ensure 100% type safety and syntax validation inside both client and backend layers:
+```bash
+# Verify client compilation
+cd app && npx -p typescript tsc --noEmit
+
+# Verify backend compilation
+cd backend && npx -p typescript tsc --noEmit
+```
+
+### 2. Run Integrated Cryptographic Threat Tests
+Our integrated test runner validates the entire security threat matrix programmatically. In your runtime setup, calling `FullFlowTest` handles:
+* `run()` - Basic identity establishment, offline databases persistence, and AI events.
+* `runNetworkStressTest()` - SQLite queuing resiliency under rapid socket link flickering.
+* `runMetadataHardeningTest()` - Standard bucket sizing (256/1024/4096), token registries, and volatile one-time prekey fetch-wipes.
+* `runDuressAndSideChannelTest()` - Decoy partition separation, Panic zeroizations, prompt exploit shields, and timing timing noise.

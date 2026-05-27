@@ -24,6 +24,14 @@ export default function SettingsScreen() {
           // z ~ 1 when phone is flat face down.
           if (z > 0.85) {
             console.warn('[Sensor Alert] Face-down accelerometer gesture detected! Triggering immediate Panic zeroization.');
+            if (settings.practiceModeEnabled) {
+              Alert.alert(
+                "🧪 Practice Mode Sensor Alert",
+                "Practice Alert: Face-down gesture triggered successfully! Real data remains safe.",
+                [{ text: "OK" }]
+              );
+              return;
+            }
             IdentityService.executePanicZeroization().then(() => {
               const { BackHandler } = require('react-native');
               BackHandler.exitApp();
@@ -35,6 +43,15 @@ export default function SettingsScreen() {
         const { EventBus } = require('../services/EventBus');
         const listener = async () => {
           console.warn('[Mock Sensor] Face-down simulated gesture detected! Wiping keys...');
+          if (settings.practiceModeEnabled) {
+            console.log('Practice Alert: Simulated face-down zeroization sweep. Real data preserved.');
+            Alert.alert(
+              "🧪 Practice Mode Simulated Gesture",
+              "Practice Alert: Face-down simulated sensor triggered successfully! Real data remains safe.",
+              [{ text: "OK" }]
+            );
+            return;
+          }
           await IdentityService.executePanicZeroization();
         };
         EventBus.on('sensor.face-down-detected', listener);
@@ -48,9 +65,18 @@ export default function SettingsScreen() {
         subscription.remove();
       }
     };
-  }, [settings.panicGestureEnabled]);
+  }, [settings.panicGestureEnabled, settings.practiceModeEnabled]);
 
   const handlePanicPurge = () => {
+    if (settings.practiceModeEnabled) {
+      Alert.alert(
+        "🧪 Practice Mode Triggered",
+        "Practice Alert: Zeroization engine triggered successfully! In production, this physically overwrites your database files and permanently purges E2EE keys. Real data preserved.",
+        [{ text: "OK" }]
+      );
+      return;
+    }
+
     Alert.alert(
       "⚠️ ACTIVATE PANIC PURGE?",
       "This will physically overwrite your local database files and permanently delete E2EE and hybrid PQ identity keys from the secure hardware enclave. This action CANNOT be undone.",
@@ -166,6 +192,25 @@ export default function SettingsScreen() {
 
         <Text className="text-lg font-bold mb-4 mt-4 text-gray-800">Duress & Physical Defenses</Text>
 
+        {/* HIGH-VISIBILTY WARNING DRAWER */}
+        <View className="bg-red-50 p-4 rounded-xl mb-6 border border-red-200">
+          <Text className="text-red-800 font-bold mb-1 text-sm">⚠️ CRITICAL PRIVACY ADVISORY</Text>
+          <Text className="text-red-700 text-xs leading-relaxed">
+            Duress features are destructive by design. Triggering a Panic Purge physically overwrites database files and permanently wipes E2EE key materials from the hardware enclave. This data is absolutely unrecoverable.
+          </Text>
+        </View>
+
+        <View className="flex-row justify-between items-center mb-6">
+          <View className="flex-1 mr-4">
+            <Text className="text-base font-semibold">Duress Practice Mode</Text>
+            <Text className="text-gray-500 text-sm">Test and practice duress passphrases or gestures safely with benign simulated alerts (recommended for first-time setup)</Text>
+          </View>
+          <Switch
+            value={settings.practiceModeEnabled}
+            onValueChange={() => toggleSwitch('practiceModeEnabled')}
+          />
+        </View>
+
         <View className="flex-row justify-between items-center mb-6">
           <View className="flex-1 mr-4">
             <Text className="text-base font-semibold">Duress Decoy Vault</Text>
@@ -186,6 +231,54 @@ export default function SettingsScreen() {
             value={settings.panicGestureEnabled}
             onValueChange={() => toggleSwitch('panicGestureEnabled')}
           />
+        </View>
+
+        <Text className="text-lg font-bold mb-4 mt-4 text-gray-800">Multi-Device Synchronizations</Text>
+
+        <View className="bg-gray-50 p-4 rounded-xl mb-6 border border-gray-200">
+          <Text className="text-gray-800 font-bold mb-1 text-sm">🔄 P2P KEY EXCHANGE WIZARD</Text>
+          <Text className="text-gray-600 text-xs leading-relaxed mb-4">
+            Transfer Bob's E2EE & post-quantum identity keys securely to a secondary device. Both devices maintain independent ratchets to protect forward secrecy.
+          </Text>
+          
+          <View className="flex-row justify-between">
+            <TouchableOpacity 
+              onPress={async () => {
+                const payload = await IdentityService.generateD2DTransferPayload('123456');
+                if (payload) {
+                  Alert.alert(
+                    "🔑 QR Payload Generated (PIN: 123456)",
+                    `Share this secure, encrypted transient package with your secondary device:\n\n${payload.substring(0, 150)}...`,
+                    [{ text: "OK" }]
+                  );
+                } else {
+                  Alert.alert("Error", "Failed to generate key exchange payload.");
+                }
+              }}
+              className="bg-blue-500 flex-1 mr-2 py-2 rounded-lg items-center"
+            >
+              <Text className="text-white font-semibold text-xs">Export Key Payload</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              onPress={async () => {
+                // Simulate secondary device scanning/importing Bob's payload
+                const mockPin = '123456';
+                const mockPayload = await IdentityService.generateD2DTransferPayload(mockPin);
+                if (mockPayload) {
+                  const success = await IdentityService.importD2DTransferPayload(mockPayload, mockPin);
+                  if (success) {
+                    Alert.alert("Success", "E2EE and hybrid post-quantum identity keys successfully imported onto this secondary device! Isolated ratchets instantiated.");
+                  } else {
+                    Alert.alert("Error", "Key decryption or import failed.");
+                  }
+                }
+              }}
+              className="bg-gray-800 flex-1 ml-2 py-2 rounded-lg items-center"
+            >
+              <Text className="text-white font-semibold text-xs">Simulate Import</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <TouchableOpacity 

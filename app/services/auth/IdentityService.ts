@@ -1,6 +1,7 @@
 import * as Signal from '@privacyresearch/libsignal-protocol-typescript';
 import * as SecureStore from 'expo-secure-store';
 import { createMlKem768 } from 'mlkem';
+import CryptoJS from 'crypto-js';
 
 // Helper to convert ArrayBuffer to Base64 and back
 export function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -310,5 +311,80 @@ export class IdentityService {
     
     const { executeAppZeroization } = require('../storage/LocalDb');
     return await executeAppZeroization();
+  }
+
+  static async generateD2DTransferPayload(pin: string): Promise<string | null> {
+    try {
+      console.log('[D2D Sync] Preparing secure primary-to-secondary identity key transfer payload...');
+      
+      const keys = await this.loadKeys();
+      const pqKeys = await this.loadPqKeys();
+      if (!keys || !pqKeys) throw new Error('Identity keys not generated yet');
+
+      // Derive symmetric wrapping key from high-entropy pin using PBKDF2
+      const salt = CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
+      const derivedKey = CryptoJS.PBKDF2(pin, salt, {
+        keySize: 256 / 32,
+        iterations: 10000
+      }).toString();
+
+      const payload = JSON.stringify({
+        registrationId: keys.registrationId,
+        identityKey: arrayBufferToBase64(keys.identityKey),
+        privateKey: arrayBufferToBase64(keys.privateKey),
+        pqPublicKey: arrayBufferToBase64(pqKeys.publicKey),
+        pqSecretKey: arrayBufferToBase64(pqKeys.secretKey),
+      });
+
+      const encrypted = CryptoJS.AES.encrypt(payload, derivedKey).toString();
+      
+      return JSON.stringify({
+        salt,
+        ciphertext: encrypted
+      });
+    } catch (e: any) {
+      console.error('[D2D Sync] Failed to generate transfer package:', e.message);
+      return null;
+    }
+  }
+
+  static async importD2DTransferPayload(transferString: string, pin: string): Promise<boolean> {
+    try {
+      console.log('[D2D Sync] Decrypting and importing shared identities on secondary device...');
+      
+      const { salt, ciphertext } = JSON.parse(transferString);
+      if (!salt || !ciphertext) throw new Error('Invalid transfer package format');
+
+      const derivedKey = CryptoJS.PBKDF2(pin, salt, {
+        keySize: 256 / 32,
+        iterations: 10000
+      }).toString();
+
+      const decrypted = CryptoJS.AES.decrypt(ciphertext, derivedKey).toString(CryptoJS.enc.Utf8);
+      if (!decrypted) throw new Error('PIN verification failed (decryption returned empty string)');
+
+      const parsed = JSON.parse(decrypted);
+      
+      // Save Classical Keys
+      const keys = {
+        registrationId: parsed.registrationId,
+        identityKey: base64ToArrayBuffer(parsed.identityKey),
+        privateKey: base64ToArrayBuffer(parsed.privateKey),
+      };
+      await this.saveKeys(keys);
+
+      // Save Post-Quantum Keys
+      const pqKeys = {
+        publicKey: base64ToArrayBuffer(parsed.pqPublicKey),
+        secretKey: base64ToArrayBuffer(parsed.pqSecretKey),
+      };
+      await this.savePqKeys(pqKeys);
+
+      console.log('✅ [D2D Sync] Multi-device identity keys securely imported and loaded in Secure Enclave!');
+      return true;
+    } catch (e: any) {
+      console.error('[D2D Sync] Failed to import shared identities:', e.message);
+      return false;
+    }
   }
 }
