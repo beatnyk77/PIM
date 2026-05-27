@@ -2,11 +2,44 @@ import React from 'react';
 import { View, Text, Switch, SafeAreaView, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { useStore } from '../services/storage/StateManager';
 import { useNavigation } from '@react-navigation/native';
-import { IdentityService } from '../services/auth/IdentityService';
+import { IdentityService, base64ToArrayBuffer } from '../services/auth/IdentityService';
 
 export default function SettingsScreen() {
   const { settings, updateSettings } = useStore();
   const navigation = useNavigation();
+
+  const [showLinkedDevicesScreen, setShowLinkedDevicesScreen] = React.useState(false);
+  const [linkedDevices, setLinkedDevices] = React.useState<any[]>([]);
+
+  React.useEffect(() => {
+    if (showLinkedDevicesScreen) {
+      IdentityService.getLinkedDevices().then(setLinkedDevices);
+    }
+  }, [showLinkedDevicesScreen]);
+
+  const confirmRevocation = (deviceId: number, nickname: string) => {
+    Alert.alert(
+      "⚠️ REVOKE DEVICE?",
+      `Are you sure you want to cryptographically revoke '${nickname}'? This will immediately broadcast a signed epoch update to all contacts, permanently blocking this device from decrypting future E2EE messages.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Revoke Device",
+          style: "destructive",
+          onPress: async () => {
+            const success = await IdentityService.revokeDevice(deviceId);
+            if (success) {
+              Alert.alert("Success", `'${nickname}' has been cryptographically revoked.`);
+              const updated = await IdentityService.getLinkedDevices();
+              setLinkedDevices(updated);
+            } else {
+              Alert.alert("Error", "Failed to revoke device.");
+            }
+          }
+        }
+      ]
+    );
+  };
 
   const toggleSwitch = (key: keyof typeof settings) => {
     updateSettings({ [key]: !settings[key] });
@@ -107,6 +140,91 @@ export default function SettingsScreen() {
       ]
     );
   };
+
+  if (showLinkedDevicesScreen) {
+    return (
+      <SafeAreaView className="flex-1 bg-white">
+        <View className="p-4 border-b border-gray-200 flex-row items-center justify-between">
+          <TouchableOpacity onPress={() => setShowLinkedDevicesScreen(false)} className="flex-row items-center">
+            <Text className="text-blue-500 text-lg">Back</Text>
+          </TouchableOpacity>
+          <Text className="text-xl font-bold text-gray-900">Manage Linked Devices</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        <ScrollView className="p-4 flex-1">
+          <View className="bg-blue-50 p-4 rounded-xl mb-6 border border-blue-200">
+            <Text className="text-blue-800 font-bold mb-1 text-sm">🔒 CRYPTOGRAPHIC CO-RESIDENCY</Text>
+            <Text className="text-blue-700 text-xs leading-relaxed">
+              All trusted secondary devices inherit the root classical and post-quantum identity keys. However, each device utilizes completely independent ratchets, prekey pools, and signal addresses to enforce absolute forward secrecy.
+            </Text>
+          </View>
+
+          <Text className="text-lg font-bold mb-3 text-gray-800">Trusted Devices ({linkedDevices.length})</Text>
+
+          {linkedDevices.map((dev) => {
+            const isPrimary = dev.deviceId === 1;
+            const isRevoked = !!dev.revocationEpoch;
+            const safetyNumber = IdentityService.generateD2DSafetyNumber(
+              base64ToArrayBuffer(dev.publicKey || 'AAAA'),
+              base64ToArrayBuffer(dev.publicKey || 'AAAA')
+            );
+
+            return (
+              <View key={dev.deviceId} className={`p-4 rounded-xl mb-4 border ${isRevoked ? 'bg-gray-50 border-gray-200 opacity-60' : 'bg-white border-gray-200 shadow-sm'}`}>
+                <View className="flex-row justify-between items-start mb-2">
+                  <View className="flex-1 mr-2">
+                    <View className="flex-row items-center">
+                      <Text className={`text-base font-bold ${isRevoked ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
+                        {dev.nickname || `Device #${dev.deviceId}`}
+                      </Text>
+                      {isPrimary && (
+                        <View className="bg-blue-100 px-2 py-0.5 rounded ml-2">
+                          <Text className="text-blue-800 text-xs font-semibold">Primary</Text>
+                        </View>
+                      )}
+                      {isRevoked && (
+                        <View className="bg-red-100 px-2 py-0.5 rounded ml-2">
+                          <Text className="text-red-800 text-xs font-semibold">Revoked</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text className="text-gray-500 text-xs mt-1">
+                      Device ID: {dev.deviceId} • Added: {new Date(dev.addedAt).toLocaleDateString()}
+                    </Text>
+                    <Text className="text-gray-500 text-xs mt-0.5">
+                      Last Active: {dev.lastActive ? new Date(dev.lastActive).toLocaleTimeString() : 'Unknown'}
+                    </Text>
+                  </View>
+
+                  {!isPrimary && !isRevoked && (
+                    <TouchableOpacity
+                      onPress={() => confirmRevocation(dev.deviceId, dev.nickname || `Device #${dev.deviceId}`)}
+                      className="bg-red-50 border border-red-200 px-3 py-1.5 rounded-lg"
+                    >
+                      <Text className="text-red-600 font-semibold text-xs">Revoke</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {!isRevoked && (
+                  <View className="mt-3 bg-gray-50 p-2.5 rounded-lg border border-gray-100">
+                    <Text className="text-gray-600 font-semibold text-xs mb-1">🛡️ Safety Number Fingerprint</Text>
+                    <Text className="text-gray-500 text-[10px] font-mono leading-relaxed select-all">
+                      HEX: {safetyNumber.hex}
+                    </Text>
+                    <Text className="text-gray-500 text-[10px] font-mono leading-relaxed mt-0.5 select-all">
+                      NUMERIC: {safetyNumber.numeric}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -252,7 +370,7 @@ export default function SettingsScreen() {
             <Text className="text-base font-semibold mb-2">Linked Devices</Text>
             <Text className="text-gray-500 text-sm mb-4">Manage trusted secondary devices. Revoking a device will bump the revocation epoch and cryptographically block it from accessing new incoming E2EE messages.</Text>
             
-            <TouchableOpacity className="bg-blue-600 py-3 rounded-lg items-center">
+            <TouchableOpacity onPress={() => setShowLinkedDevicesScreen(true)} className="bg-blue-600 py-3 rounded-lg items-center">
                 <Text className="text-white font-bold">Manage Linked Devices</Text>
             </TouchableOpacity>
         </View>

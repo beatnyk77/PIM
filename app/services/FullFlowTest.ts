@@ -576,6 +576,55 @@ export class FullFlowTest {
             await SecureStore.deleteItemAsync(mockKey);
             
             this.log('✅ Simulated Practice Mode accelerometer triggers successfully validated!');
+
+            // 4. Validate Active Device Revocation and Signed Epoch Broadcasts
+            this.log('4. Testing Active Multi-Device Revocation and Cryptographic Verification...');
+            
+            // Generate a valid signature for revocation
+            const mockDeviceId = 99;
+            const mockEpoch = Date.now();
+            const signature = await IdentityService.signRevocationEpoch(mockDeviceId, mockEpoch);
+            if (!signature) {
+                throw new Error('Revocation signing failed. Keys missing?');
+            }
+            this.log('  - Local Device Revocation signature successfully generated via Ed25519 root identity key.');
+
+            // Verify the signature locally using the same keys (simulating contact validation, since we know our own pubkey)
+            // Note: Since verifyRevocationSignature fetches from MessageRelay.fetchPreKeyBundle, and we're local, 
+            // we will simulate the prekey fetch in MessageRelay directly for our test.
+            const originalFetch = MessageRelay.fetchPreKeyBundle;
+            MessageRelay.fetchPreKeyBundle = async () => ({
+                identityKey: arrayBufferToBase64((await IdentityService.loadKeys())!.identityKey)
+            } as any);
+
+            const isVerified = await IdentityService.verifyRevocationSignature('self-test-contact', mockDeviceId, mockEpoch, signature);
+            if (!isVerified) {
+                throw new Error('Revocation signature verification failed!');
+            }
+            this.log('  - Device Revocation broadcast signature cryptographically verified!');
+
+            // Test failure with tampered epoch
+            const isVerifiedTampered = await IdentityService.verifyRevocationSignature('self-test-contact', mockDeviceId, mockEpoch - 1000, signature);
+            if (isVerifiedTampered) {
+                throw new Error('Tampered Revocation signature INCORRECTLY verified! Major vulnerability!');
+            }
+            this.log('  - Tampered Revocation broadcast signature correctly rejected!');
+
+            // Save the epoch and test retrieval
+            await IdentityService.saveContactRevocationEpoch('self-test-contact', mockDeviceId, mockEpoch);
+            const revocations = await IdentityService.getContactRevocations();
+            if (revocations['self-test-contact']?.[mockDeviceId] !== mockEpoch) {
+                throw new Error('Failed to save and retrieve contact revocation epoch');
+            }
+            this.log('  - Verified Revocation Epoch successfully committed to persistent local storage blocklist.');
+
+            // Restore mock
+            MessageRelay.fetchPreKeyBundle = originalFetch;
+            
+            // Clean up revocation for the test
+            await SecureStore.deleteItemAsync('contact_revocations_v1');
+
+            this.log('✅ Active Multi-Device Signed Revocation protocol successfully validated!');
             this.log('✅ Automated Threat Model E2E Test Suite completed successfully!');
             console.log('==================================================\n');
             return true;

@@ -95,6 +95,23 @@ class MessageRelayService {
         try {
           const parsed = JSON.parse(decryptedContent);
           
+          if (parsed && parsed.type === 'device-revocation') {
+            console.log(`[MessageRelay] Received signed device-revocation broadcast from ${senderId} for device ${parsed.revokedDeviceId}`);
+            const isVerified = await IdentityService.verifyRevocationSignature(
+              senderId,
+              parsed.revokedDeviceId,
+              parsed.revocationEpoch,
+              parsed.signature
+            );
+            if (isVerified) {
+              console.log(`[MessageRelay] Revocation signature verified! Saving epoch ${parsed.revocationEpoch} for device ${parsed.revokedDeviceId}`);
+              await IdentityService.saveContactRevocationEpoch(senderId, parsed.revokedDeviceId, parsed.revocationEpoch);
+            } else {
+              console.warn(`[MessageRelay] INVALID revocation signature received from ${senderId}!`);
+            }
+            return;
+          }
+
           if (parsed && parsed.type === 'token-handshake') {
             console.log(`MessageRelay: Processing bootstrap token-handshake from ${senderId}`);
             await this.saveOutboundTokens(senderId, parsed.tokens);
@@ -211,6 +228,23 @@ class MessageRelayService {
           try {
             const parsed = JSON.parse(decryptedContent);
             
+            if (parsed && parsed.type === 'device-revocation') {
+              console.log(`[MessageRelay] Received signed device-revocation broadcast from ${data.from} for device ${parsed.revokedDeviceId}`);
+              const isVerified = await IdentityService.verifyRevocationSignature(
+                data.from,
+                parsed.revokedDeviceId,
+                parsed.revocationEpoch,
+                parsed.signature
+              );
+              if (isVerified) {
+                console.log(`[MessageRelay] Revocation signature verified! Saving epoch ${parsed.revocationEpoch} for device ${parsed.revokedDeviceId}`);
+                await IdentityService.saveContactRevocationEpoch(data.from, parsed.revokedDeviceId, parsed.revocationEpoch);
+              } else {
+                console.warn(`[MessageRelay] INVALID revocation signature received from ${data.from}!`);
+              }
+              return;
+            }
+
             if (parsed && parsed.type === 'token-handshake') {
               console.log(`MessageRelay: Processing bootstrap token-handshake from ${data.from}`);
               await this.saveOutboundTokens(data.from, parsed.tokens);
