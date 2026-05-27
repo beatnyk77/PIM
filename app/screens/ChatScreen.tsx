@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, SafeAreaView, KeyboardAvoidingView, Platform, TextInput, TouchableOpacity, Text, ActivityIndicator, Modal, ScrollView } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import ChatThread from '../components/ChatThread';
 import { useStore, ChatMessage } from '../services/storage/StateManager';
 import { AiAdvisor } from '../services/ai/AiAdvisor';
@@ -14,6 +15,7 @@ import { EncryptionService } from '../services/messaging/EncryptionService';
 
 export default function ChatScreen() {
   const { messages, addMessage, setMessages, updateMessageStatus, activeChat, activeGroup, setActiveGroup, setActiveChat, settings, deleteMessage } = useStore();
+  const navigation = useNavigation<any>();
   const commitmentStore = useCommitmentStore();
   const [inputText, setInputText] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -133,16 +135,33 @@ export default function ChatScreen() {
       }
     };
 
+    const onSecurityUpdate = (data: any) => {
+        if (activeGroup && data.groupId === activeGroup) {
+            const systemMsg: ChatMessage = {
+                id: Date.now().toString(),
+                content: `🛡️ Security Alert: ${data.message}`,
+                senderId: 'system',
+                timestamp: new Date(),
+                isMe: false,
+                status: 'read',
+                groupId: data.groupId
+            };
+            addMessage(systemMsg);
+        }
+    };
+
     EventBus.on('message.received', onMessage);
     EventBus.on('message.secure-received', onSecureMessage);
     EventBus.on('message.group-received', onGroupMessage);
     EventBus.on('message.read-receipt', onReadReceipt);
+    EventBus.on('group.security_update', onSecurityUpdate);
 
     return () => {
       EventBus.off('message.received', onMessage);
       EventBus.off('message.secure-received', onSecureMessage);
       EventBus.off('message.group-received', onGroupMessage);
       EventBus.off('message.read-receipt', onReadReceipt);
+      EventBus.off('group.security_update', onSecurityUpdate);
     };
   }, [addMessage, updateMessageStatus, activeGroup]);
 
@@ -374,9 +393,16 @@ export default function ChatScreen() {
             </Text>
           )}
         </View>
-        <TouchableOpacity onPress={toggleGroupMode}>
-            <Text className="text-blue-500 font-semibold">{activeGroup ? 'Exit Group' : 'Join Group'}</Text>
-        </TouchableOpacity>
+        <View className="flex-row items-center gap-3">
+            {activeGroup && (
+                <TouchableOpacity onPress={() => navigation.navigate('GroupDetails')}>
+                    <Text className="text-blue-600 font-semibold text-sm">Group Info</Text>
+                </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={toggleGroupMode}>
+                <Text className="text-gray-500 font-semibold text-sm">{activeGroup ? 'Exit' : 'Join Group'}</Text>
+            </TouchableOpacity>
+        </View>
       </View>
 
       <View className="flex-1">

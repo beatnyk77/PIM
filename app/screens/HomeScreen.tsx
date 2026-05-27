@@ -100,12 +100,23 @@ export default function HomeScreen() {
         }
       />
       
-      <TouchableOpacity 
-        className="absolute bottom-6 right-6 bg-blue-600 w-14 h-14 rounded-full items-center justify-center shadow-lg"
-        onPress={() => openChat('new-user', 'direct')}
-      >
-          <Text className="text-white text-2xl">+</Text>
-      </TouchableOpacity>
+      <View className="absolute bottom-6 right-6 flex-col items-end gap-3">
+        <TouchableOpacity 
+          className="bg-purple-600 px-4 py-3 rounded-full items-center justify-center shadow-lg flex-row"
+          onPress={() => navigation.navigate('GroupCreation')}
+        >
+            <Text className="text-white font-bold mr-1">👥</Text>
+            <Text className="text-white font-bold text-sm">New Group</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          className="bg-blue-600 px-4 py-3 rounded-full items-center justify-center shadow-lg flex-row"
+          onPress={() => openChat('new-user', 'direct')}
+        >
+            <Text className="text-white font-bold mr-1">👤</Text>
+            <Text className="text-white font-bold text-sm">New Chat</Text>
+        </TouchableOpacity>
+      </View>
 
       <SafetyCheckWizard />
     </SafeAreaView>

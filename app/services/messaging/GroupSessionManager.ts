@@ -8,6 +8,7 @@ import {
 } from '../storage/LocalDb';
 import { EncryptionService } from './EncryptionService';
 import { IdentityService } from '../auth/IdentityService';
+import { EventBus } from '../EventBus';
 import CryptoJS from 'crypto-js';
 
 export interface GroupMember {
@@ -267,6 +268,13 @@ export class GroupSessionManagerClass {
     }
 
     console.log(`[GroupSessionManager] Revocation E2EE propagation and healing of group completed! Moved to Epoch ${nextEpoch}`);
+    
+    // Notify UI of local revocation action
+    EventBus.emit('group.security_update', {
+      groupId,
+      message: `Member ${userId} was revoked. Sender keys rotated for Post-Compromise Security (Epoch ${nextEpoch}).`
+    });
+
     return nextContext;
   }
 
@@ -324,6 +332,12 @@ export class GroupSessionManagerClass {
       await this.saveRoster(groupId, updatedRoster);
       await this.saveContext(groupId, nextContext);
       console.log(`[GroupSessionManager] Applied remote revocation handshake. Group moved to Epoch ${nextEpoch}`);
+      
+      // Notify UI of remote revocation action
+      EventBus.emit('group.security_update', {
+        groupId,
+        message: `Member ${revokedUser} was revoked by ${senderId}. Post-Compromise Security healing applied (Epoch ${nextEpoch}).`
+      });
     }
   }
 
