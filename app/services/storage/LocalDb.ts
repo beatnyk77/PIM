@@ -263,12 +263,12 @@ export async function initializeSecureDb(passphrase: string, isDecoy: boolean = 
     let salt = await SecureStore.getItemAsync(SALT_STORAGE_KEY);
     if (!salt) {
       salt = CryptoJS.lib.WordArray.random(32).toString(CryptoJS.enc.Hex);
-      await SecureStore.setItemAsync(SALT_STORAGE_KEY, salt);
+      await SecureStore.setItemAsync(SALT_STORAGE_KEY, salt as string);
       console.log(`LocalDb: Generated fresh Enclave salt for ${SALT_STORAGE_KEY}`);
     }
 
     // Derive Master Key via PBKDF2
-    const derivedKey = CryptoJS.PBKDF2(passphrase, salt, {
+    const derivedKey = CryptoJS.PBKDF2(passphrase, salt as string, {
       keySize: 256 / 32,
       iterations: 20000
     }).toString(CryptoJS.enc.Hex);
