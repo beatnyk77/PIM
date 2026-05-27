@@ -713,3 +713,24 @@ export const saveGroupSenderKeyToDb = async (groupId: string, senderId: string, 
         console.error('Error saving group sender key:', e);
     }
 };
+
+export const deleteGroupSenderKeyFromDb = async (groupId: string, senderId: string): Promise<boolean> => {
+    try {
+        const collection = database.get<GroupSenderKeyEntry>('group_sender_keys');
+        const existing = await collection.query(
+            Q.and(Q.where('group_id', groupId), Q.where('sender_id', senderId))
+        ).fetch();
+        if (existing.length > 0) {
+            await database.write(async () => {
+                await existing[0].destroyPermanently();
+            });
+            console.log(`LocalDb: Physically wiped group sender key for ${senderId} in group ${groupId}`);
+            return true;
+        }
+        return false;
+    } catch (e) {
+        console.error('Error deleting group sender key:', e);
+        return false;
+    }
+};
+

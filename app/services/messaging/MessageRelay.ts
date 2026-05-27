@@ -171,8 +171,16 @@ class MessageRelayService {
           }
 
           if (parsed && parsed.type === 'group-key-distribution') {
-            console.log(`MessageRelay: Received group-key-distribution for group ${parsed.groupId} from ${senderId}`);
-            await saveGroupSenderKeyToDb(parsed.groupId, senderId, parsed.senderKey);
+            console.log(`MessageRelay: Received group-key-distribution for group ${parsed.groupId} from ${senderId} device ${parsed.senderDeviceId || '1'}`);
+            const compositeSenderId = `${senderId}:${parsed.senderDeviceId || '1'}`;
+            await saveGroupSenderKeyToDb(parsed.groupId, compositeSenderId, parsed.senderKey);
+            return;
+          }
+
+          if (parsed && parsed.type === 'group-handshake') {
+            console.log(`MessageRelay: Received group-handshake control packet from ${senderId}`);
+            const { GroupSessionManager } = require('./GroupSessionManager');
+            await GroupSessionManager.processInboundHandshake(parsed.groupId, senderId, parsed.envelope.senderDeviceId.toString(), parsed.envelope.payload ? JSON.parse(parsed.envelope.payload) : parsed.envelope);
             return;
           }
         } catch (e) {
@@ -310,8 +318,16 @@ class MessageRelayService {
             }
 
             if (parsed && parsed.type === 'group-key-distribution') {
-              console.log(`MessageRelay: Received group-key-distribution for group ${parsed.groupId} from ${data.from}`);
-              await saveGroupSenderKeyToDb(parsed.groupId, data.from, parsed.senderKey);
+              console.log(`MessageRelay: Received group-key-distribution for group ${parsed.groupId} from ${data.from} device ${parsed.senderDeviceId || '1'}`);
+              const compositeSenderId = `${data.from}:${parsed.senderDeviceId || '1'}`;
+              await saveGroupSenderKeyToDb(parsed.groupId, compositeSenderId, parsed.senderKey);
+              return;
+            }
+
+            if (parsed && parsed.type === 'group-handshake') {
+              console.log(`MessageRelay: Received group-handshake control packet from ${data.from}`);
+              const { GroupSessionManager } = require('./GroupSessionManager');
+              await GroupSessionManager.processInboundHandshake(parsed.groupId, data.from, parsed.envelope.senderDeviceId.toString(), parsed.envelope.payload ? JSON.parse(parsed.envelope.payload) : parsed.envelope);
               return;
             }
           } catch (e) {
@@ -381,8 +397,24 @@ class MessageRelayService {
     this.socket.on('group-message', async (data: any) => {
         console.log('MessageRelay: Received group message in', data.groupId);
         try {
-          if (data.ciphertext && data.ciphertext.version === 'v1_group_sender_key') {
-            const decryptedContent = await EncryptionService.decryptGroupMessage(data.groupId, data.from, data.ciphertext);
+          if (data.ciphertext && (
+            data.ciphertext.version === 'v1_group_sender_key' || 
+            data.ciphertext.version === 'v1_group_sender_key_multi' || 
+            data.ciphertext.version === 'v2_group_mls_transition'
+          )) {
+            let decryptedContent: string | null = null;
+            if (data.ciphertext.version === 'v2_group_mls_transition') {
+              const { GroupSessionManager } = require('./GroupSessionManager');
+              decryptedContent = await GroupSessionManager.decrypt(data.groupId, data.ciphertext);
+            } else {
+              decryptedContent = await EncryptionService.decryptGroupMessage(
+                data.groupId, 
+                data.from, 
+                data.ciphertext, 
+                data.ciphertext.senderDeviceId?.toString()
+              );
+            }
+
             if (decryptedContent) {
               console.log('MessageRelay: Group message decrypted successfully!');
               
@@ -671,43 +703,55 @@ class MessageRelayService {
 
   async sendGroupMessage(groupId: string, content: string, type: string = 'text', mediaUri?: string) {
     try {
-      const participants = ['user2'];
-      const mySenderKey = await EncryptionService.getOrGenerateGroupSenderKey(groupId);
-
-      for (const userId of participants) {
-        const distributedKey = await getSignalStoreValue(`group_key_sent:${groupId}:${userId}`);
-        if (!distributedKey) {
-          console.log(`MessageRelay: Distributing group key for ${groupId} to participant ${userId}`);
-          const distributionPayload = JSON.stringify({
-            type: 'group-key-distribution',
-            groupId,
-            senderKey: mySenderKey
-          });
-          await this.sendSecureMessage(userId, distributionPayload);
-          await saveSignalStoreValue(`group_key_sent:${groupId}:${userId}`, 'true');
-        }
-      }
+      const { GroupSessionManager } = require('./GroupSessionManager');
+      const context = await GroupSessionManager.getGroupContext(groupId);
 
       let encryptedPayload: any;
-      if (type === 'image' || type === 'audio') {
-        if (mediaUri) {
-          console.log(`MessageRelay: Encrypting media attachment: ${mediaUri}`);
-          const mediaEncResult = await EncryptionService.encryptMedia(mediaUri);
-          
-          const mediaPayload = JSON.stringify({
-            type: 'media',
-            text: content,
-            encryptedMediaUri: mediaEncResult.encryptedUri,
-            mediaKey: mediaEncResult.key,
-            mediaIv: mediaEncResult.iv
-          });
 
-          encryptedPayload = await EncryptionService.encryptGroupMessage(groupId, mediaPayload);
-        } else {
-          encryptedPayload = await EncryptionService.encryptGroupMessage(groupId, content);
-        }
+      if (context) {
+        console.log(`[MessageRelay] Encrypting group message via MLS-aligned GroupSessionManager (Epoch ${context.epoch})`);
+        encryptedPayload = await GroupSessionManager.encrypt(groupId, content);
       } else {
-        encryptedPayload = await EncryptionService.encryptGroupMessage(groupId, content);
+        const participants = ['user2'];
+        const keys = await IdentityService.loadKeys();
+        const myDeviceId = keys ? keys.deviceId.toString() : '1';
+        const mySenderKey = await EncryptionService.getOrGenerateGroupSenderKey(groupId, myDeviceId);
+
+        for (const userId of participants) {
+          const distributedKey = await getSignalStoreValue(`group_key_sent:${groupId}:${userId}`);
+          if (!distributedKey) {
+            console.log(`MessageRelay: Distributing legacy group key for ${groupId} to participant ${userId}`);
+            const distributionPayload = JSON.stringify({
+              type: 'group-key-distribution',
+              groupId,
+              senderKey: mySenderKey,
+              senderDeviceId: myDeviceId
+            });
+            await this.sendSecureMessage(userId, distributionPayload);
+            await saveSignalStoreValue(`group_key_sent:${groupId}:${userId}`, 'true');
+          }
+        }
+
+        if (type === 'image' || type === 'audio') {
+          if (mediaUri) {
+            console.log(`MessageRelay: Encrypting media attachment: ${mediaUri}`);
+            const mediaEncResult = await EncryptionService.encryptMedia(mediaUri);
+            
+            const mediaPayload = JSON.stringify({
+              type: 'media',
+              text: content,
+              encryptedMediaUri: mediaEncResult.encryptedUri,
+              mediaKey: mediaEncResult.key,
+              mediaIv: mediaEncResult.iv
+            });
+
+            encryptedPayload = await EncryptionService.encryptGroupMessage(groupId, mediaPayload, myDeviceId);
+          } else {
+            encryptedPayload = await EncryptionService.encryptGroupMessage(groupId, content, myDeviceId);
+          }
+        } else {
+          encryptedPayload = await EncryptionService.encryptGroupMessage(groupId, content, myDeviceId);
+        }
       }
 
       const messageId = Date.now().toString() + Math.random().toString(36).substr(2, 5);

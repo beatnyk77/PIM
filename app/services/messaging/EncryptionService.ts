@@ -695,37 +695,41 @@ class EncryptionServiceClass {
     }
   }
 
-  async getOrGenerateGroupSenderKey(groupId: string): Promise<string> {
+  async getOrGenerateGroupSenderKey(groupId: string, senderDeviceId?: string): Promise<string> {
     const keys = await IdentityService.loadKeys();
     if (!keys) throw new Error("Local identity keys not loaded");
     const myId = keys.registrationId.toString();
+    const deviceId = senderDeviceId || keys.deviceId.toString();
+    const compositeSenderId = `${myId}:${deviceId}`;
     
-    let key = await getGroupSenderKeyFromDb(groupId, myId);
+    let key = await getGroupSenderKeyFromDb(groupId, compositeSenderId);
     if (!key) {
       const randBytes = CryptoJS.lib.WordArray.random(32);
       key = randBytes.toString(CryptoJS.enc.Hex);
-      await saveGroupSenderKeyToDb(groupId, myId, key);
+      await saveGroupSenderKeyToDb(groupId, compositeSenderId, key);
     }
     this.cryptoLog('Get/Generate Group Sender Key', {
       groupId,
-      senderId: myId,
+      senderId: compositeSenderId,
       senderKey: key,
     });
     return key;
   }
 
-  async encryptGroupMessage(groupId: string, message: string): Promise<any> {
+  async encryptGroupMessage(groupId: string, message: string, senderDeviceId?: string): Promise<any> {
     const keys = await IdentityService.loadKeys();
     if (!keys) throw new Error("Local identity keys not loaded");
     const myId = keys.registrationId.toString();
+    const deviceId = senderDeviceId || keys.deviceId.toString();
+    const compositeSenderId = `${myId}:${deviceId}`;
 
-    const currentSenderKey = await this.getOrGenerateGroupSenderKey(groupId);
+    const currentSenderKey = await this.getOrGenerateGroupSenderKey(groupId, deviceId);
 
     const currentKeyWords = CryptoJS.enc.Hex.parse(currentSenderKey);
     const K_msg = CryptoJS.HmacSHA256("GroupSenderKeyMessageKey", currentKeyWords).toString();
     const nextSenderKey = CryptoJS.HmacSHA256("GroupSenderKeyNextKey", currentKeyWords).toString();
 
-    await saveGroupSenderKeyToDb(groupId, myId, nextSenderKey);
+    await saveGroupSenderKeyToDb(groupId, compositeSenderId, nextSenderKey);
 
     const iv = CryptoJS.lib.WordArray.random(16);
     const padded = padPlaintext(message);
@@ -737,7 +741,7 @@ class EncryptionServiceClass {
 
     this.cryptoLog('Encrypt Group Message', {
       groupId,
-      myId,
+      myId: compositeSenderId,
       currentSenderKey,
       derivedMessageKey: K_msg,
       nextSenderKey,
@@ -745,23 +749,27 @@ class EncryptionServiceClass {
     });
 
     return {
-      version: 'v1_group_sender_key',
+      version: 'v1_group_sender_key_multi',
       groupId,
       senderId: myId,
+      senderDeviceId: deviceId,
       ciphertext: encrypted.toString(),
       iv: iv.toString()
     };
   }
 
-  async decryptGroupMessage(groupId: string, senderId: string, envelope: any): Promise<string | null> {
-    if (!envelope || envelope.version !== 'v1_group_sender_key') {
+  async decryptGroupMessage(groupId: string, senderId: string, envelope: any, senderDeviceId?: string): Promise<string | null> {
+    if (!envelope || (envelope.version !== 'v1_group_sender_key' && envelope.version !== 'v1_group_sender_key_multi')) {
       console.warn("decryptGroupMessage: Invalid envelope or version mismatch");
       return null;
     }
 
-    const currentSenderKey = await getGroupSenderKeyFromDb(groupId, senderId);
+    const deviceId = senderDeviceId || envelope.senderDeviceId || '1';
+    const compositeSenderId = `${senderId}:${deviceId}`;
+
+    const currentSenderKey = await getGroupSenderKeyFromDb(groupId, compositeSenderId);
     if (!currentSenderKey) {
-      console.warn(`decryptGroupMessage: No cached group sender key found for sender ${senderId} in group ${groupId}`);
+      console.warn(`decryptGroupMessage: No cached group sender key found for sender ${compositeSenderId} in group ${groupId}`);
       return null;
     }
 
@@ -781,11 +789,11 @@ class EncryptionServiceClass {
       }
       const plaintext = stripPadding(padded);
 
-      await saveGroupSenderKeyToDb(groupId, senderId, nextSenderKey);
+      await saveGroupSenderKeyToDb(groupId, compositeSenderId, nextSenderKey);
 
       this.cryptoLog('Decrypt Group Message', {
         groupId,
-        senderId,
+        senderId: compositeSenderId,
         currentSenderKey,
         derivedMessageKey: K_msg,
         nextSenderKey,
@@ -794,7 +802,7 @@ class EncryptionServiceClass {
 
       return plaintext;
     } catch (e) {
-      console.error(`decryptGroupMessage: Failed to decrypt group message from ${senderId}`, e);
+      console.error(`decryptGroupMessage: Failed to decrypt group message from ${compositeSenderId}`, e);
       return null;
     }
   }

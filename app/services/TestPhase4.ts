@@ -1,5 +1,7 @@
 import { EncryptionService } from './messaging/EncryptionService';
 import { IdentityService } from './auth/IdentityService';
+import { MessageRelay } from './messaging/MessageRelay';
+import { GroupSessionManager } from './messaging/GroupSessionManager';
 import { 
   getGroupSenderKeyFromDb, 
   saveGroupSenderKeyToDb, 
@@ -190,8 +192,131 @@ export async function runPhase4IntegrationTest(): Promise<boolean> {
     console.log(`  - Confirmed: Record physically deleted from database.`);
     console.log('✅ Physical SQLite deletion verified successfully!');
 
+    // ----------------------------------------------------
+    // Test 5: MLS-aligned Multi-Device Group Roster & Epoch Increment
+    // ----------------------------------------------------
+    console.log('\n5. Testing MLS-aligned Multi-Device Group Roster & Epoch Increment...');
+    
+    const mlsGroupId = 'mls-group-test-99';
+    // Roster of initial devices: Bob (Device 1 and Device 45), and ourselves (will be auto-added)
+    const initialRoster = [
+      { userId: 'bob-user-id', deviceId: 1, identityKey: 'bob-identity-device-1' },
+      { userId: 'bob-user-id', deviceId: 45, identityKey: 'bob-identity-device-45' },
+      { userId: 'loopback', deviceId: 99, identityKey: 'loopback-device-99' }
+    ];
+
+    const initContext = await GroupSessionManager.createGroupSession(mlsGroupId, initialRoster);
+    console.log(`- Created Group Context: Epoch ${initContext.epoch}, Tree Hash: ${initContext.treeHash}`);
+    if (initContext.epoch !== 1) {
+      throw new Error("MLS-aligned group initialization epoch is not 1");
+    }
+
+    const initialRosterList = await GroupSessionManager.getGroupRoster(mlsGroupId);
+    console.log(`- Initial Roster Size: ${initialRosterList.length}`);
+    if (initialRosterList.length < 4) {
+      throw new Error("Roster did not include all members plus primary device");
+    }
+    console.log('✅ MLS group initialized successfully with dynamic device roster tree!');
+
+    // ----------------------------------------------------
+    // Test 6: E2EE Group Message, Active Revocation & Post-Compromise Security (PCS)
+    // ----------------------------------------------------
+    console.log('\n6. Testing Active Revocation, Key Rotation & PCS Block...');
+    
+    // Distribute keys to loopback device and encrypt test message
+    const originalSendSecureMessage = MessageRelay.sendSecureMessage;
+    const sentMessages: string[] = [];
+    MessageRelay.sendSecureMessage = async (recipient: string, payload: string) => {
+      sentMessages.push(recipient);
+      return "mock-e2e-id";
+    };
+
+    console.log('- Encrypting a normal group message under Epoch 1...');
+    const envelope1 = await GroupSessionManager.encrypt(mlsGroupId, 'Pre-revocation secure communication.');
+    console.log(`  - Envelope Epoch: ${envelope1.epoch}`);
+    console.log(`  - Content Type: ${envelope1.contentType}`);
+    console.log(`  - Ciphertext Signature: ${envelope1.signature}`);
+    
+    if (envelope1.epoch !== 1 || envelope1.contentType !== 'application') {
+      throw new Error("Application E2EE envelope metadata mismatch");
+    }
+
+    // Decrypt E2EE message as active member (loopback)
+    const decrypted1 = await GroupSessionManager.decrypt(mlsGroupId, envelope1);
+    console.log(`- Loopback Decrypted content: "${decrypted1}"`);
+    if (decrypted1 !== 'Pre-revocation secure communication.') {
+      throw new Error("Application decryption failed for active member");
+    }
+
+    // Now, perform revocation of Bob
+    console.log('- Revoking Bob (bob-user-id) from the group to heal tree...');
+    const nextContext = await GroupSessionManager.revokeGroupMember(mlsGroupId, 'bob-user-id');
+    console.log(`  - Healed Epoch: ${nextContext.epoch}`);
+    console.log(`  - Healed Tree Hash: ${nextContext.treeHash}`);
+    if (nextContext.epoch !== 2) {
+      throw new Error("Revocation did not increment group epoch to 2");
+    }
+
+    const rosterAfterRevoke = await GroupSessionManager.getGroupRoster(mlsGroupId);
+    const bobNode = rosterAfterRevoke.find(m => m.userId === 'bob-user-id');
+    if (bobNode && bobNode.status !== 'revoked') {
+      throw new Error("Revoked user status is not marked as revoked");
+    }
+    console.log('  - Confirmed: Bob\'s roster leaf state set to revoked.');
+
+    // Assert that Bob\'s keys have been physically purged from local DB
+    const bobKey1 = await getGroupSenderKeyFromDb(mlsGroupId, 'bob-user-id:1');
+    const bobKey2 = await getGroupSenderKeyFromDb(mlsGroupId, 'bob-user-id:45');
+    if (bobKey1 || bobKey2) {
+      throw new Error("Failed to physically wipe revoked member keys from local DB cache!");
+    }
+    console.log('  - Confirmed: Revoked member\'s keys physically deleted from local storage.');
+
+    // Encrypt a new message under Epoch 2 (post-compromise)
+    console.log('- Encrypting new group message under Epoch 2...');
+    const envelope2 = await GroupSessionManager.encrypt(mlsGroupId, 'Post-revocation highly-classified brief.');
+    console.log(`  - New Envelope Epoch: ${envelope2.epoch}`);
+    if (envelope2.epoch !== 2) {
+      throw new Error("New message was not encrypted under updated epoch 2");
+    }
+
+    // Try to decrypt under old epoch (Simulate Bob attempting to replay older keys/epochs)
+    console.log('- Bob attempts to decrypt envelope2...');
+    const bobEnvelope = { ...envelope2, epoch: 1 }; // Bob has not received updated epoch
+    const bobDecrypted = await GroupSessionManager.decrypt(mlsGroupId, bobEnvelope);
+    if (bobDecrypted !== null) {
+      throw new Error("VULNERABILITY: Revoked member decrypted a message using an older epoch!");
+    }
+    console.log('  - Confirmed: Bob blocked from decrypting post-revocation message (PCS preserved)!');
+
+    // Remaining active loopback member decrypts successfully
+    console.log('- Loopback device decrypting envelope2...');
+    const decrypted2 = await GroupSessionManager.decrypt(mlsGroupId, envelope2);
+    console.log(`  - Loopback Decrypted content: "${decrypted2}"`);
+    if (decrypted2 !== 'Post-revocation highly-classified brief.') {
+      throw new Error("Active remaining member failed to decrypt post-revocation message");
+    }
+
+    // Try to decrypt a message sent by Bob after he was revoked
+    console.log('- Revoked Bob attempts to send a forged group message...');
+    const forgedBobEnvelope = {
+      ...envelope2,
+      senderId: 'bob-user-id',
+      senderDeviceId: 1
+    };
+    const forgedDecrypted = await GroupSessionManager.decrypt(mlsGroupId, forgedBobEnvelope);
+    if (forgedDecrypted !== null) {
+      throw new Error("VULNERABILITY: Accepted and decrypted group message from a revoked participant!");
+    }
+    console.log('  - Confirmed: Messages from revoked senders are strictly rejected and blocked!');
+
+    // Restore MessageRelay stub
+    MessageRelay.sendSecureMessage = originalSendSecureMessage;
+
+    console.log('✅ Group revocation, epoch propagation, and PCS E2E verified successfully!');
+
     console.log('\n==================================================');
-    console.log('🎉 ALL PHASE 4 INTEGRATION TESTS PASSED!');
+    console.log('🎉 ALL PHASE 4 & 8 INTEGRATION TESTS PASSED!');
     console.log('==================================================\n');
     return true;
   } catch (error) {
