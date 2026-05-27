@@ -1,5 +1,5 @@
 import { EventBus } from './EventBus';
-import { IdentityService } from './auth/IdentityService';
+import { IdentityService, arrayBufferToBase64 } from './auth/IdentityService';
 import { MessageRelay } from './messaging/MessageRelay';
 import { AiAdvisor } from './ai/AiAdvisor';
 import { useStore } from './storage/StateManager';
@@ -636,7 +636,7 @@ export class FullFlowTest {
             const originalSend = MessageRelay.sendSecureMessage;
             MessageRelay.sendSecureMessage = async (recipient: string, payload: string) => {
                 sentPayloads.push({ recipient, payload });
-                return true;
+                return "mock_message_id";
             };
             
             // Mark device 99 as revoked (which triggers revokeDevice and signs epoch broadcast)
