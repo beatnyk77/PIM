@@ -12,6 +12,7 @@ export default function GroupDetailsScreen() {
   const [epoch, setEpoch] = useState<number>(1);
   const [isLoading, setIsLoading] = useState(true);
   const [myId, setMyId] = useState<string | null>(null);
+  const [amIAdmin, setAmIAdmin] = useState(false);
 
   useEffect(() => {
     loadGroupData();
@@ -31,6 +32,13 @@ export default function GroupDetailsScreen() {
 
       const currentRoster = await GroupSessionManager.getGroupRoster(activeGroup);
       setRoster(currentRoster);
+      
+      const myNode = currentRoster.find(m => m.userId === keys?.registrationId.toString());
+      if (myNode && myNode.role === 'admin') {
+        setAmIAdmin(true);
+      } else {
+        setAmIAdmin(false);
+      }
     } catch (e) {
       console.error('Failed to load group details', e);
     } finally {
@@ -70,7 +78,9 @@ export default function GroupDetailsScreen() {
             <Text className="text-blue-500 font-semibold text-lg">Back</Text>
         </TouchableOpacity>
         <Text className="text-xl font-bold text-gray-900">Group Info</Text>
-        <View style={{ width: 40 }} />
+        <TouchableOpacity onPress={() => (navigation as any).navigate('GroupSettings')}>
+            <Text className="text-gray-500 font-bold text-xl">⚙️</Text>
+        </TouchableOpacity>
       </View>
 
       {isLoading ? (
@@ -108,11 +118,16 @@ export default function GroupDetailsScreen() {
                                 <Text className="text-[10px] text-red-700 font-bold uppercase">Revoked</Text>
                             </View>
                         )}
+                        {!isRevoked && member.role === 'admin' && (
+                            <View className="ml-2 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200">
+                                <Text className="text-[10px] text-blue-700 font-bold uppercase">Admin</Text>
+                            </View>
+                        )}
                     </View>
                     <Text className="text-xs text-gray-500 font-mono">Device: {member.deviceId}</Text>
                  </View>
                  
-                 {!isMe && !isRevoked && (
+                 {!isMe && !isRevoked && amIAdmin && (
                      <TouchableOpacity 
                         onPress={() => handleRevoke(member.userId)}
                         className="bg-red-50 px-4 py-2 rounded-lg border border-red-200 active:bg-red-100"

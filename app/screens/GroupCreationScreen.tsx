@@ -13,6 +13,7 @@ export default function GroupCreationScreen() {
   const [memberIdInput, setMemberIdInput] = useState('');
   const [members, setMembers] = useState<string[]>([]); // Storing User IDs
   const [isCreating, setIsCreating] = useState(false);
+  const [isEphemeralLink, setIsEphemeralLink] = useState(false);
 
   const addMember = () => {
     if (memberIdInput.trim() && !members.includes(memberIdInput.trim())) {
@@ -37,7 +38,8 @@ export default function GroupCreationScreen() {
       const initialMembers = members.map(userId => ({
         userId,
         deviceId: 1, // Defaulting to 1 for mock
-        identityKey: 'mock-identity-key-for-' + userId
+        identityKey: 'mock-identity-key-for-' + userId,
+        role: 'member' as const
       }));
 
       // 3. Create Group Session in MLS Manager
@@ -57,8 +59,8 @@ export default function GroupCreationScreen() {
   };
 
   const generateInviteLink = () => {
-    // Just a UI mock for generating a deep link string
-    return `pim://group/join/mock_${Date.now()}`;
+    const base = `pim://group/join/mock_${Date.now()}`;
+    return isEphemeralLink ? `${base}?ephemeral=true` : base;
   };
 
   return (
@@ -113,7 +115,17 @@ export default function GroupCreationScreen() {
         )}
 
         <View className="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-6">
-          <Text className="text-blue-800 font-semibold mb-1">Invite Link</Text>
+          <View className="flex-row justify-between items-center mb-2">
+            <Text className="text-blue-800 font-semibold">Invite Link</Text>
+            <TouchableOpacity 
+              onPress={() => setIsEphemeralLink(!isEphemeralLink)}
+              className={`px-3 py-1 rounded-full border ${isEphemeralLink ? 'bg-orange-100 border-orange-300' : 'bg-blue-100 border-blue-300'}`}
+            >
+              <Text className={`text-xs font-bold ${isEphemeralLink ? 'text-orange-700' : 'text-blue-700'}`}>
+                {isEphemeralLink ? '⏳ One-Time' : '♾️ Permanent'}
+              </Text>
+            </TouchableOpacity>
+          </View>
           <Text className="text-blue-600 text-sm mb-2">You can also share an invite link after creation.</Text>
           <View className="bg-white p-2 rounded border border-blue-200">
              <Text className="text-gray-500 font-mono text-xs">{generateInviteLink()}</Text>

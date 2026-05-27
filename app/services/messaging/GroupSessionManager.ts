@@ -16,6 +16,7 @@ export interface GroupMember {
   deviceId: number;
   identityKey: string;
   status: 'active' | 'revoked';
+  role: 'admin' | 'member';
 }
 
 export interface MLSGroupContext {
@@ -57,9 +58,9 @@ export class GroupSessionManagerClass {
   async createGroupSession(groupId: string, initialMembers: Omit<GroupMember, 'status'>[]): Promise<MLSGroupContext> {
     console.log(`[GroupSessionManager] Initializing new MLS-aligned group: ${groupId}`);
     
-    const roster: GroupMember[] = initialMembers.map(m => ({ ...m, status: 'active' }));
+    const roster: GroupMember[] = initialMembers.map(m => ({ ...m, status: 'active', role: 'member' }));
     
-    // Add primary device as active member if not included
+    // Add primary device as active admin member if not included
     const keys = await IdentityService.loadKeys();
     if (keys) {
       const myId = keys.registrationId.toString();
@@ -68,7 +69,8 @@ export class GroupSessionManagerClass {
           userId: myId,
           deviceId: keys.deviceId,
           identityKey: CryptoJS.SHA256(keys.identityKey.toString()).toString(),
-          status: 'active'
+          status: 'active',
+          role: 'admin'
         });
       }
     }

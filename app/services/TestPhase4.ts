@@ -200,9 +200,9 @@ export async function runPhase4IntegrationTest(): Promise<boolean> {
     const mlsGroupId = 'mls-group-test-99';
     // Roster of initial devices: Bob (Device 1 and Device 45), and ourselves (will be auto-added)
     const initialRoster = [
-      { userId: 'bob-user-id', deviceId: 1, identityKey: 'bob-identity-device-1' },
-      { userId: 'bob-user-id', deviceId: 45, identityKey: 'bob-identity-device-45' },
-      { userId: 'loopback', deviceId: 99, identityKey: 'loopback-device-99' }
+      { userId: 'user2', deviceId: 1, identityKey: 'mock-id-key-u2', role: 'member' as const },
+      { userId: 'user3', deviceId: 1, identityKey: 'mock-id-key-u3', role: 'member' as const },
+      { userId: 'loopback', deviceId: 99, identityKey: 'loopback-device-99', role: 'member' as const }
     ];
 
     const initContext = await GroupSessionManager.createGroupSession(mlsGroupId, initialRoster);

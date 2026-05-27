@@ -6,6 +6,9 @@ For the initial public beta, we are bypassing traditional app stores (TestFlight
 * **Target Audience:** Privacy advocates, security researchers, and journalists needing high-assurance communications.
 
 ## Beta Focus Areas (v0.9.0-beta.1)
+* **Group Messaging & UI:**
+  * **Role Constraints:** Ensure that only members marked as `Admin` can revoke users.
+  * **Key Rotation & Ephemeral Links:** Test that when an admin revokes a member, key rotation immediately engages and generates distinct UI system notifications. Additionally, test the toggle for One-Time Ephemeral links in group creation.
 * **Multi-Device Sync & Revocation:** Test linking multiple devices. Verify that offline/online revocation via signed epoch broadcasts properly propagates to contacts and cuts off compromised devices.
 * **Safety Check Wizard:** Validate that the first-launch wizard successfully authenticates the secure database mount and local key enclave.
 * **Lite Mode:** Verify stability improvements and battery savings on older devices when Lite Mode is toggled.

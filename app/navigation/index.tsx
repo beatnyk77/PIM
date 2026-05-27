@@ -7,6 +7,7 @@ import CommitmentsScreen from '../screens/CommitmentsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import GroupCreationScreen from '../screens/GroupCreationScreen';
 import GroupDetailsScreen from '../screens/GroupDetailsScreen';
+import GroupSettingsScreen from '../screens/GroupSettingsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -48,6 +49,11 @@ export default function AppNavigator() {
         <Stack.Screen 
           name="GroupDetails" 
           component={GroupDetailsScreen} 
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="GroupSettings" 
+          component={GroupSettingsScreen} 
           options={{ headerShown: false }}
         />
       </Stack.Navigator>
