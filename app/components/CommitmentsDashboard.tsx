@@ -3,12 +3,37 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, TextInput, Activity
 import { useCommitmentStore, Commitment } from '../stores/useCommitmentStore';
 import { AiAdvisor } from '../services/ai/AiAdvisor';
 import { MemoryIndex } from '../services/ai/MemoryIndex';
+import { summarizeSourceText } from '../services/commitments/commitmentComposer';
 
 export const CommitmentsDashboard = () => {
-  const { commitments, toggleCommitment, removeCommitment } = useCommitmentStore();
+  const { commitments, toggleCommitment, removeCommitment, addCommitment } = useCommitmentStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [newTitle, setNewTitle] = useState('');
+  const [newDeadline, setNewDeadline] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const handleAddCommitment = async () => {
+    const title = newTitle.trim();
+    const deadline = newDeadline.trim();
+
+    if (!title) {
+      setFormError('Add a task title first.');
+      return;
+    }
+
+    setIsAdding(true);
+    setFormError(null);
+    try {
+      addCommitment(title, deadline || undefined, { source: 'manual' });
+      setNewTitle('');
+      setNewDeadline('');
+    } finally {
+      setIsAdding(false);
+    }
+  };
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
@@ -39,6 +64,16 @@ export const CommitmentsDashboard = () => {
         {item.deadline && (
           <Text style={styles.deadline}>Due: {item.deadline}</Text>
         )}
+        <View style={styles.metaRow}>
+          <Text style={styles.sourceBadge}>
+            {item.source === 'manual' ? 'Manual' : 'Captured from chat'}
+          </Text>
+          {item.sourceText ? (
+            <Text style={styles.sourceText} numberOfLines={2}>
+              {summarizeSourceText(item.sourceText)}
+            </Text>
+          ) : null}
+        </View>
       </TouchableOpacity>
       <TouchableOpacity 
         style={styles.deleteButton} 
@@ -60,12 +95,54 @@ export const CommitmentsDashboard = () => {
 
   return (
     <View style={styles.container}>
+      {/* Manual Capture Section */}
+      <View style={styles.section}>
+        <Text style={styles.header}>Capture Commitment</Text>
+        <Text style={styles.helperText}>
+          Add action items yourself so they do not depend on AI detection.
+        </Text>
+
+        <TextInput
+          style={styles.input}
+          placeholder="What needs to get done?"
+          value={newTitle}
+          onChangeText={(text) => {
+            setNewTitle(text);
+            setFormError(null);
+          }}
+          returnKeyType="next"
+        />
+
+        <TextInput
+          style={styles.input}
+          placeholder="Due date or note (optional)"
+          value={newDeadline}
+          onChangeText={setNewDeadline}
+          returnKeyType="done"
+          onSubmitEditing={handleAddCommitment}
+        />
+
+        {formError ? <Text style={styles.errorText}>{formError}</Text> : null}
+
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={handleAddCommitment}
+          disabled={isAdding}
+        >
+          {isAdding ? (
+            <ActivityIndicator color="white" size="small" />
+          ) : (
+            <Text style={styles.addButtonText}>Add to list</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
       {/* Search Section */}
       <View style={styles.section}>
         <Text style={styles.header}>Semantic Search</Text>
         <View style={styles.searchRow}>
           <TextInput
-            style={styles.input}
+            style={styles.searchInput}
             placeholder="Search your memories..."
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -133,6 +210,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     color: '#555',
   },
+  helperText: {
+    color: '#666',
+    fontSize: 13,
+    marginBottom: 12,
+    lineHeight: 18,
+  },
   list: {
     paddingBottom: 20,
   },
@@ -185,6 +268,14 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   input: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  searchInput: {
     flex: 1,
     backgroundColor: 'white',
     borderRadius: 8,
@@ -192,6 +283,23 @@ const styles = StyleSheet.create({
     marginRight: 8,
     borderWidth: 1,
     borderColor: '#ddd',
+  },
+  errorText: {
+    color: '#b42318',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  addButton: {
+    backgroundColor: '#111827',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+  },
+  addButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
   searchButton: {
     backgroundColor: '#007AFF',
@@ -220,6 +328,22 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 4,
     textAlign: 'right',
+  },
+  metaRow: {
+    marginTop: 8,
+  },
+  sourceBadge: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#4b5563',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  sourceText: {
+    fontSize: 11,
+    color: '#6b7280',
+    lineHeight: 15,
+    marginTop: 2,
   },
   resultsList: {
     maxHeight: 200,

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { EventBus } from '../services/EventBus';
+import { appendCommitment, CommitmentRecord } from '../services/commitments/commitmentComposer';
 
 export interface Commitment {
   id: string;
@@ -7,29 +8,42 @@ export interface Commitment {
   deadline?: string;
   status: 'pending' | 'completed';
   createdAt: number;
+  source: 'manual' | 'chat';
+  sourceText?: string;
+  sourceChatId?: string;
+  sourceMessageId?: string;
 }
 
 interface CommitmentState {
   commitments: Commitment[];
-  addCommitment: (title: string, deadline?: string) => void;
+  addCommitment: (
+    title: string,
+    deadline?: string,
+    metadata?: {
+      source?: 'manual' | 'chat';
+      sourceText?: string;
+      sourceChatId?: string;
+      sourceMessageId?: string;
+    },
+  ) => void;
   toggleCommitment: (id: string) => void;
   removeCommitment: (id: string) => void;
 }
 
 export const useCommitmentStore = create<CommitmentState>((set) => ({
   commitments: [],
-  addCommitment: (title, deadline) => set((state) => ({
-    commitments: [
-      ...state.commitments,
-      {
-        id: Math.random().toString(36).substr(2, 9),
-        title,
-        deadline,
-        status: 'pending',
-        createdAt: Date.now(),
-      },
-    ],
-  })),
+  addCommitment: (title, deadline, metadata) => set((state) => {
+    const result = appendCommitment(state.commitments as CommitmentRecord[], {
+      title,
+      deadline,
+      source: metadata?.source ?? 'manual',
+      sourceText: metadata?.sourceText,
+      sourceChatId: metadata?.sourceChatId,
+      sourceMessageId: metadata?.sourceMessageId,
+    });
+
+    return result.added ? { commitments: result.commitments } : state;
+  }),
   toggleCommitment: (id) => set((state) => ({
     commitments: state.commitments.map((c) =>
       c.id === id ? { ...c, status: c.status === 'pending' ? 'completed' : 'pending' } : c
@@ -43,5 +57,9 @@ export const useCommitmentStore = create<CommitmentState>((set) => ({
 // Global listener to capture AI detected tasks/commitments
 EventBus.on('ai.task-detected', (data: any) => {
   console.log('useCommitmentStore: Auto-adding task:', data.task);
-  useCommitmentStore.getState().addCommitment(data.task, 'Today');
+  useCommitmentStore.getState().addCommitment(data.task, 'Today', {
+    source: 'chat',
+    sourceText: data.originalContent,
+    sourceChatId: data.chatId,
+  });
 });

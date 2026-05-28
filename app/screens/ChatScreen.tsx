@@ -17,7 +17,6 @@ import { IdentityService } from '../services/auth/IdentityService';
 export default function ChatScreen() {
   const { messages, addMessage, setMessages, updateMessageStatus, activeChat, activeGroup, setActiveGroup, setActiveChat, settings, deleteMessage } = useStore();
   const navigation = useNavigation<any>();
-  const commitmentStore = useCommitmentStore();
   const [inputText, setInputText] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [detectedTone, setDetectedTone] = useState<Tone | null>(null);
@@ -386,7 +385,11 @@ export default function ChatScreen() {
         const task = await AiAdvisor.extractTasks(newMessage.content);
         if (task) {
              const { useCommitmentStore } = require('../stores/useCommitmentStore');
-             useCommitmentStore.getState().addCommitment(task.title, task.deadline);
+             useCommitmentStore.getState().addCommitment(task.title, task.deadline, {
+               source: 'chat',
+               sourceText: newMessage.content,
+               sourceChatId: activeGroup || activeChat || undefined,
+             });
         }
     } catch (e) {
         console.log('Task extraction failed', e);
