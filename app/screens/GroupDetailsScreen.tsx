@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Alert, Switch, Clipboard } from 'react-native';
+import { View, Text, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Alert, Switch, Clipboard, TextInput } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { GroupSessionManager, GroupMember } from '../services/messaging/GroupSessionManager';
 import { useStore } from '../services/storage/StateManager';
@@ -18,8 +18,13 @@ export default function GroupDetailsScreen() {
   // Invite link generation states
   const [isBurnOnUse, setIsBurnOnUse] = useState(true);
   const [isTimeLimited, setIsTimeLimited] = useState(false);
+  const [isPasswordProtected, setIsPasswordProtected] = useState(false);
+  const [invitePassword, setInvitePassword] = useState('');
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
+
+  // Local audit logs
+  const [auditLogs, setAuditLogs] = useState<Array<{ timestamp: number, action: string, details: string }>>([]);
 
   useEffect(() => {
     loadGroupData();
@@ -46,6 +51,10 @@ export default function GroupDetailsScreen() {
       } else {
         setAmIAdmin(false);
       }
+
+      // Fetch E2EE decrypted local audit logs
+      const logs = await GroupSessionManager.getAdminAuditLogs(activeGroup);
+      setAuditLogs(logs);
     } catch (e) {
       console.error('Failed to load group details', e);
     } finally {
@@ -56,12 +65,14 @@ export default function GroupDetailsScreen() {
   const handleGenerateInvite = async () => {
     if (!activeGroup) return;
     const inviteToken = `inv_${Math.random().toString(36).substring(2, 10)}`;
-    
-    // Register invite token locally in group storage
-    await GroupSessionManager.registerInviteToken(activeGroup, inviteToken, isBurnOnUse);
+    const expiresAt = isTimeLimited ? Date.now() + 10 * 60 * 1000 : undefined;
+    const password = isPasswordProtected && invitePassword.trim() ? invitePassword.trim() : undefined;
+
+    // Register invite token locally in group storage with optional password/expiry
+    await GroupSessionManager.registerInviteToken(activeGroup, inviteToken, isBurnOnUse, password, expiresAt);
 
     const base = `pim://group/join/${activeGroup}`;
-    const link = `${base}?token=${inviteToken}&burn=${isBurnOnUse}&ephemeral=${isTimeLimited}`;
+    const link = `${base}?token=${inviteToken}&burn=${isBurnOnUse}&ephemeral=${isTimeLimited}${password ? '&pw=true' : ''}`;
     setGeneratedLink(link);
   };
 
@@ -155,6 +166,29 @@ export default function GroupDetailsScreen() {
               />
             </View>
 
+            <View className="flex-row justify-between items-center mb-3">
+              <View className="flex-1 mr-4">
+                <Text className="text-sm font-semibold text-gray-800">Password Protected (Optional)</Text>
+                <Text className="text-xs text-gray-400">Require an invite code/PIN to join this group.</Text>
+              </View>
+              <Switch
+                value={isPasswordProtected}
+                onValueChange={setIsPasswordProtected}
+                trackColor={{ false: '#e5e7eb', true: '#a855f7' }}
+              />
+            </View>
+
+            {isPasswordProtected && (
+              <TextInput
+                className="bg-gray-50 p-3 rounded-lg mb-4 text-sm font-semibold border border-gray-200"
+                placeholder="Enter Invite Password/PIN"
+                value={invitePassword}
+                onChangeText={setInvitePassword}
+                secureTextEntry
+                autoCapitalize="none"
+              />
+            )}
+
             <TouchableOpacity
               onPress={handleGenerateInvite}
               className="bg-purple-600 p-3 rounded-xl items-center mb-4 active:bg-purple-700 shadow-sm"
@@ -226,6 +260,36 @@ export default function GroupDetailsScreen() {
                </View>
              );
           })}
+
+          {/* Encrypted Local Group Audit Logs Timeline */}
+          <Text className="text-lg font-bold text-gray-900 mt-6 mb-3">🛡️ Security Audit Logs ({auditLogs.length})</Text>
+          
+          <View className="bg-white rounded-xl border border-gray-200 p-4 mb-8 shadow-sm">
+            {auditLogs.length === 0 ? (
+              <Text className="text-gray-400 text-xs italic text-center py-2">No admin events recorded yet.</Text>
+            ) : (
+              [...auditLogs].reverse().map((log, idx) => (
+                <View key={idx} className={`flex-row pb-4 relative ${idx === auditLogs.length - 1 ? 'pb-0' : 'border-b border-gray-100 mb-3'}`}>
+                  <View className="mr-3 items-center">
+                    <View className="w-2.5 h-2.5 rounded-full bg-purple-600 z-10" />
+                  </View>
+                  <View className="flex-1">
+                    <View className="flex-row justify-between items-center mb-1 flex-wrap">
+                      <Text className="text-xs font-bold text-gray-800 bg-purple-50 px-2 py-0.5 rounded border border-purple-100 uppercase tracking-wide">
+                        {log.action}
+                      </Text>
+                      <Text className="text-[10px] text-gray-400 font-mono">
+                        {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </Text>
+                    </View>
+                    <Text className="text-xs text-gray-650 font-mono leading-relaxed bg-gray-50 p-2 rounded mt-1 border border-gray-100">
+                      {log.details}
+                    </Text>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
         </ScrollView>
       )}
     </SafeAreaView>

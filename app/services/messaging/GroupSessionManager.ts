@@ -271,6 +271,9 @@ export class GroupSessionManagerClass {
 
     console.log(`[GroupSessionManager] Revocation E2EE propagation and healing of group completed! Moved to Epoch ${nextEpoch}`);
     
+    // Log admin action locally
+    await this.logAdminAction(groupId, 'Member Revoked', `Member ${userId} was cryptographically revoked.`);
+
     // Notify UI of local revocation action
     EventBus.emit('group.security_update', {
       groupId,
@@ -335,6 +338,9 @@ export class GroupSessionManagerClass {
       await this.saveContext(groupId, nextContext);
       console.log(`[GroupSessionManager] Applied remote revocation handshake. Group moved to Epoch ${nextEpoch}`);
       
+      // Log admin action locally
+      await this.logAdminAction(groupId, 'Member Revoked (Remote)', `Member ${revokedUser} was revoked by admin ${senderId}.`);
+
       // Notify UI of remote revocation action
       EventBus.emit('group.security_update', {
         groupId,
@@ -415,22 +421,23 @@ export class GroupSessionManagerClass {
 
   // --- Ephemeral Invite Links & Burn-on-Use Management ---
 
-  async registerInviteToken(groupId: string, token: string, isBurnOnUse: boolean): Promise<void> {
-    console.log(`[GroupSessionManager] Registering invite token ${token} for group ${groupId} (Burn on use: ${isBurnOnUse})`);
+  async registerInviteToken(groupId: string, token: string, isBurnOnUse: boolean, password?: string, expiresAt?: number): Promise<void> {
+    console.log(`[GroupSessionManager] Registering invite token ${token} for group ${groupId} (Burn on use: ${isBurnOnUse}, HasPW: ${!!password}, Expires: ${expiresAt})`);
     const payload = JSON.stringify({
       groupId,
       token,
       isBurnOnUse,
+      password,
+      expiresAt,
       status: 'active'
     });
     await saveSignalStoreValue(`invite_token:${token}`, payload);
   }
 
-  async validateAndBurnInviteToken(token: string): Promise<{ status: 'valid' | 'burned' | 'invalid'; groupId?: string }> {
+  async validateAndBurnInviteToken(token: string, enteredPassword?: string): Promise<{ status: 'valid' | 'burned' | 'invalid' | 'expired' | 'incorrect_password'; groupId?: string }> {
     console.log(`[GroupSessionManager] Validating invite token ${token}`);
     const raw = await getSignalStoreValue(`invite_token:${token}`);
     if (!raw) {
-      // Mock fallback: if it's a simulated link with prefix, let's treat it as valid to avoid blocking tests
       if (token.startsWith('mock_') || token.includes('group_') || token.includes('test')) {
         const parts = token.split('_');
         const groupId = parts[1] ? `group_${parts[1]}` : 'test-group';
@@ -444,6 +451,16 @@ export class GroupSessionManagerClass {
       return { status: 'burned', groupId: data.groupId };
     }
 
+    if (data.expiresAt && Date.now() > data.expiresAt) {
+      console.warn(`[GroupSessionManager] Invite token ${token} has EXPIRED!`);
+      return { status: 'expired', groupId: data.groupId };
+    }
+
+    if (data.password && data.password !== enteredPassword) {
+      console.warn(`[GroupSessionManager] Invite token password mismatch!`);
+      return { status: 'incorrect_password', groupId: data.groupId };
+    }
+
     if (data.isBurnOnUse) {
       data.status = 'burned';
       await saveSignalStoreValue(`invite_token:${token}`, JSON.stringify(data));
@@ -451,6 +468,28 @@ export class GroupSessionManagerClass {
     }
 
     return { status: 'valid', groupId: data.groupId };
+  }
+
+  // --- Encrypted Local Group Audit Log ---
+
+  async logAdminAction(groupId: string, action: string, details: string): Promise<void> {
+    console.log(`[GroupSessionManager] 🛡️ Logging admin action in ${groupId}: ${action} - ${details}`);
+    const logKey = `group_audit_log:${groupId}`;
+    const rawLogs = await getSignalStoreValue(logKey);
+    const logs = rawLogs ? JSON.parse(rawLogs) : [];
+    
+    logs.push({
+      timestamp: Date.now(),
+      action,
+      details
+    });
+
+    await saveSignalStoreValue(logKey, JSON.stringify(logs));
+  }
+
+  async getAdminAuditLogs(groupId: string): Promise<Array<{ timestamp: number, action: string, details: string }>> {
+    const rawLogs = await getSignalStoreValue(`group_audit_log:${groupId}`);
+    return rawLogs ? JSON.parse(rawLogs) : [];
   }
 }
 

@@ -439,6 +439,9 @@ class MessageRelayService {
                       const { useStore } = require('../storage/StateManager');
                       useStore.getState().deleteMessage(parsed.targetMessageId);
                       
+                      // Log the admin moderation event in the E2EE ledger
+                      await GroupSessionManager.logAdminAction(data.groupId, 'Message Moderated', `Admin ${data.from} deleted message ID ${parsed.targetMessageId} for everyone.`);
+
                       EventBus.emit('message.deleted', { messageId: parsed.targetMessageId });
                     } else {
                       console.warn(`[MessageRelay] Security breach block: Non-admin ${data.from} tried to delete message!`);
@@ -733,7 +736,20 @@ class MessageRelayService {
 
       if (context) {
         console.log(`[MessageRelay] Encrypting group message via MLS-aligned GroupSessionManager (Epoch ${context.epoch})`);
-        encryptedPayload = await GroupSessionManager.encrypt(groupId, content);
+        if ((type === 'image' || type === 'audio') && mediaUri) {
+          console.log(`[MessageRelay] Encrypting media attachment for MLS group: ${mediaUri}`);
+          const mediaEncResult = await EncryptionService.encryptMedia(mediaUri);
+          const mediaPayload = JSON.stringify({
+            type: 'media',
+            text: content,
+            encryptedMediaUri: mediaEncResult.encryptedUri,
+            mediaKey: mediaEncResult.key,
+            mediaIv: mediaEncResult.iv
+          });
+          encryptedPayload = await GroupSessionManager.encrypt(groupId, mediaPayload);
+        } else {
+          encryptedPayload = await GroupSessionManager.encrypt(groupId, content);
+        }
       } else {
         const participants = ['user2'];
         const keys = await IdentityService.loadKeys();

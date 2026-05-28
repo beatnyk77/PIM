@@ -14,6 +14,7 @@ export default function HomeScreen() {
   const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected');
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [inviteLinkInput, setInviteLinkInput] = useState('');
+  const [invitePasswordInput, setInvitePasswordInput] = useState('');
 
   // Derive conversations from messages (simple logic for MVP)
   // Group messages by senderId or groupId to form conversation list
@@ -51,8 +52,7 @@ export default function HomeScreen() {
 
   const handleJoinSubmit = async () => {
     if (!inviteLinkInput.trim()) return;
-    setShowJoinModal(false);
-
+    
     try {
       const link = inviteLinkInput.trim();
       if (!link.startsWith('pim://group/join/')) {
@@ -74,15 +74,25 @@ export default function HomeScreen() {
       });
 
       if (token) {
-        const result = await GroupSessionManager.validateAndBurnInviteToken(token);
+        // Enforce decryption check / validation matching password input
+        const result = await GroupSessionManager.validateAndBurnInviteToken(token, invitePasswordInput.trim());
         if (result.status === 'burned') {
           Alert.alert("Access Denied 🛡️", "This secure one-time invite link has already been burned and cannot be used!");
+          return;
+        } else if (result.status === 'expired') {
+          Alert.alert("Invite Expired ⏳", "This secure invite link has expired (10-minute validity limit reached)!");
+          return;
+        } else if (result.status === 'incorrect_password') {
+          Alert.alert("Incorrect Password 🔒", "The password/PIN you entered is incorrect. Access denied.");
           return;
         } else if (result.status === 'invalid') {
           Alert.alert("Invalid Invite", "This invite token is invalid or expired.");
           return;
         }
       }
+
+      // Hide modal once validation succeeds
+      setShowJoinModal(false);
 
       const keys = await IdentityService.loadKeys();
       const myId = keys ? keys.registrationId.toString() : 'me';
@@ -98,6 +108,7 @@ export default function HomeScreen() {
 
       setActiveGroup(groupId);
       setInviteLinkInput('');
+      setInvitePasswordInput('');
       navigation.navigate('Chat');
       
       Alert.alert("Success 🎉", `Successfully joined E2EE group: ${groupId}`);
@@ -195,6 +206,7 @@ export default function HomeScreen() {
         onRequestClose={() => {
           setShowJoinModal(false);
           setInviteLinkInput('');
+          setInvitePasswordInput('');
         }}
       >
         <View className="flex-1 justify-end bg-black/50">
@@ -215,11 +227,24 @@ export default function HomeScreen() {
               numberOfLines={3}
             />
 
+            {inviteLinkInput.includes('pw=true') && (
+              <TextInput
+                className="bg-gray-100 p-3.5 rounded-xl mb-4 font-mono text-xs border border-gray-200"
+                placeholder="🔑 Enter Invite Password/PIN"
+                value={invitePasswordInput}
+                onChangeText={setInvitePasswordInput}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            )}
+
             <View className="flex-row gap-3">
               <TouchableOpacity
                 onPress={() => {
                   setShowJoinModal(false);
                   setInviteLinkInput('');
+                  setInvitePasswordInput('');
                 }}
                 className="flex-1 bg-gray-100 py-3.5 rounded-full items-center"
               >
@@ -230,7 +255,7 @@ export default function HomeScreen() {
                 onPress={handleJoinSubmit}
                 className="flex-1 bg-indigo-600 py-3.5 rounded-full items-center active:bg-indigo-700 shadow-md"
               >
-                <Text className="text-white font-bold">Join Group</Text>
+                <Text className="text-white font-bold font-semibold">Join Group</Text>
               </TouchableOpacity>
             </View>
           </View>

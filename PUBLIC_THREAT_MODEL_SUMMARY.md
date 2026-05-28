@@ -28,10 +28,12 @@ At **Private Intelligence Messenger (PIM)**, we built a system that fundamentall
 * **Offline Catch-Up:** Even if your contacts are offline when you revoke the device, PIM's background synchronization will update them the absolute second they reconnect.
 * **Temporary Suspension:** Not sure if you just misplaced your companion device? "Suspend" it locally with a single tap to freeze its sync capabilities until you find it.
 
-## 6. Secure Group Risks (Link Hijacking & Rogue Moderation)
-**The Threat:** An attacker hijacks an invite link to gain entry, a rogue user tries to censor chats by spoofing message deletions, or cloud AI summarizing tools leak group discussions.
+## 6. Secure Group Risks (Link Hijacking, Rogue Moderation, and E2EE Media Leakage)
+**The Threat:** An attacker hijacks or intercepts an active invite link to gain unauthorized entry, a rogue user tries to censor chats by spoofing message deletions, a seized device exposes administrative actions, or media attachments leak to the relay or local storage.
 **Our Defense:**
-* **Link-Hijacking & Replays:** PIM invite links are scannable, **burn-on-use** transient tokens. The inviter's local secure database registers the unique token and instantly voids ("burns") it upon the first consumption. Any subsequent reuse of the link is blocked automatically.
+* **Link-Hijacking & Password-Protected Invites:** PIM invite links are scannable, **burn-on-use** transient tokens with **strict 10-minute expiry validation** and optional **E2EE PIN/password protection**. The invite password is used client-side to authenticate and decrypt credentials before initiating the group join handshake, ensuring even if a link is intercepted, it cannot be consumed without the PIN.
 * **Rogue Deletion Injection:** Message deletion commands are dual-encrypted to the group's active roster. Receiving clients verify the sender's identity and cross-reference their cryptographic keys with their role in the roster. If the sender is not verified as an `admin`, the deletion command is flagged and immediately dropped.
+* **Local Encrypted Audit Logs:** Administrative security actions (such as member revocations and admin message deletions) are written to a chronological local security ledger. This ledger is page-encrypted within PIM's SQLCipher database, protecting the timeline from physical device seizure or inspection.
+* **Symmetrically Encrypted Media Envelopes:** All media attachments (e.g. images) are encrypted symmetrically on-device before broadcast. They are wrapped inside formatted JSON media envelopes and securely relayed within MLS-aligned E2EE sessions, ensuring the relay server can never view or parse files.
 * **Local Group Summarization:** Search histories and conversational summarizations are computed 100% on-device by the quantized LLM. Search patterns never traverse a server or network, eliminating any cloud leak threat.
 

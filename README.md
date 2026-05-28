@@ -13,7 +13,7 @@
 *   **Panic Mode Wiping Gesture:** Accelerometer face-down flips or failed passcode thresholds execute high-priority zeroization, erasing Secure Enclave key materials, binary-scrubbing SQLite databases, and hard-exiting immediately.
 *   **Local-Only AI (Timing Shielded):** Quantized LLM execution (`llama.rn`) is protected by system role exploit sanitizers and random timing noise token padding to prevent CPU/GPUTiming attacks.
 *   **Cryptographic Multi-Device Sync:** Seamlessly link multiple devices with forward secrecy preserved across all endpoints. Device revocation broadcasts signed epoch blocks to instantly purge compromised instances from contact networks.
-*   **MLS-Aligned Secure Group Messaging:** Employs decentralized Group Sender Keys with MLS-style security epoch rotations. Features include scannable burn-on-use QR invite links, verified cryptographic admin message deletion (moderation), and private on-device AI search results summarization.
+*   **MLS-Aligned Secure Group Messaging:** Employs decentralized Group Sender Keys with MLS-style security epoch rotations. Features include scannable burn-on-use QR invite links with optional password protection and 10-minute expiry validation, local page-encrypted security audit logs for tracking administrative actions, verified cryptographic admin message deletion (moderation), private on-device AI search results summarization, and symmetrically encrypted media attachments (images) broadcast within secure MLS group sessions.
 
 ---
 
