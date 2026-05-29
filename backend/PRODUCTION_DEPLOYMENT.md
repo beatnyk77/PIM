@@ -45,18 +45,23 @@ For native mobile clients, Socket.IO connections often arrive without a browser 
 ## Railway Deployment Steps
 
 1. Create a new Railway project from the GitHub repo.
-2. Set the service root directory to `backend`.
-3. Let Railway build from `backend/Dockerfile`.
-4. Add `ALLOWED_ORIGINS` in Railway variables.
-5. Generate or attach a custom domain, for example `relay.pim-protocol.net`.
-6. Confirm Railway serves TLS, then use the `wss://` custom domain in the mobile app.
-7. Set the app build variable:
+2. Open the backend service settings.
+3. Set **Root Directory** to `/backend`.
+4. Set **Config File Path** to `/backend/railway.json` if Railway does not pick it up automatically.
+5. Confirm the builder is Dockerfile-based and uses `Dockerfile` from the backend root.
+6. Set **Healthcheck Path** to `/health` if the value from `railway.json` is not shown in deployment details.
+7. Add `ALLOWED_ORIGINS` in Railway variables.
+8. Generate or attach a custom domain, for example `relay.pim-protocol.net`.
+9. Confirm Railway serves TLS, then use the `wss://` custom domain in the mobile app.
+10. Set the app build variable:
 
 ```bash
 EXPO_PUBLIC_RELAY_URL=wss://relay.pim-protocol.net
 ```
 
-8. Rebuild the app binary with EAS after setting the relay URL.
+11. Rebuild the app binary with EAS after setting the relay URL.
+
+If Railway is still reading the repository root `package.json`, the root directory setting has not been applied to the service. The deployment logs should reference `pim-backend`, `backend/package.json`, or Docker steps from `backend/Dockerfile`, not the root `pim-monorepo` package.
 
 ## Release Checks
 
