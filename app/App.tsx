@@ -1,8 +1,45 @@
 import React from 'react';
-import { Platform, View, Text } from 'react-native';
+import { Platform, View, Text, ScrollView } from 'react-native';
 import "./global.css";
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[PIM ErrorBoundary] Caught render error:', error);
+    console.error('[PIM ErrorBoundary] Component stack:', info.componentStack);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#1a0000', padding: 20, justifyContent: 'center' }}>
+          <ScrollView>
+            <Text style={{ color: '#ff4444', fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>
+              🛑 PIM Startup Error
+            </Text>
+            <Text style={{ color: '#ff8888', fontSize: 13, marginBottom: 8 }}>
+              {this.state.error.message}
+            </Text>
+            <Text style={{ color: '#888', fontSize: 11, fontFamily: 'monospace' }}>
+              {this.state.error.stack}
+            </Text>
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function App() {
   if (Platform.OS === 'web') {
@@ -58,9 +95,11 @@ export default function App() {
   const AppNavigator = require('./navigation').default;
 
   return (
-    <SafeAreaProvider>
-      <AppNavigator />
-      <StatusBar style="auto" />
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <AppNavigator />
+        <StatusBar style="auto" />
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }

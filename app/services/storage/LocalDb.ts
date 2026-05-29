@@ -220,14 +220,31 @@ export const myMigrations = schemaMigrations({
 });
 
 // 3. Create Adapter & Database Wrapper
-const defaultAdapter = new SQLiteAdapter({
-  schema: mySchema,
-  migrations: myMigrations,
-  jsi: true,
-  onSetUpError: error => {
-    console.error('Database failed to load', error);
-  },
-});
+//
+// IMPORTANT: SQLiteAdapter instantiation is wrapped in try/catch because it runs
+// at module-load time. If WatermelonDB's native module (WMDatabaseBridge) is not
+// registered yet (Expo Go, missing link, New Architecture cold start), the invariant
+// inside SqliteNativeModulesDispatcher throws synchronously, crashing the entire
+// module chain up to App.tsx and producing a white screen with no error visible.
+//
+// jsi: false is the safe default — JSI is strictly faster but not required for correctness.
+// Switch back to jsi: true only once you confirm the native WMDatabaseJSIBridge is
+// installed and the app is running in a custom dev/production build (not Expo Go).
+let defaultAdapter: SQLiteAdapter;
+try {
+  defaultAdapter = new SQLiteAdapter({
+    schema: mySchema,
+    migrations: myMigrations,
+    jsi: false, // Safe default — avoids WMDatabaseBridge invariant throw on Expo Go / cold start
+    onSetUpError: error => {
+      console.error('Database failed to load', error);
+    },
+  });
+} catch (e) {
+  console.error('[LocalDb] CRITICAL: SQLiteAdapter failed to initialize:', e);
+  // Re-throw so ErrorBoundary in App.tsx shows a readable error instead of white screen
+  throw e;
+}
 
 class DatabaseWrapper {
   private activeDb: Database;

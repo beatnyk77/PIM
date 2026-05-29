@@ -3,8 +3,13 @@ import { View, SafeAreaView, KeyboardAvoidingView, Platform, TextInput, Touchabl
 import { useNavigation } from '@react-navigation/native';
 import ChatThread from '../components/ChatThread';
 import { useStore, ChatMessage } from '../services/storage/StateManager';
-import { AiAdvisor } from '../services/ai/AiAdvisor';
-import { ToneDetector, Tone } from '../services/ai/ToneDetector';
+// AiAdvisor and ToneDetector are lazy-required at call sites (not statically imported)
+// because AiAdvisor imports llama.rn and react-native-fs — both heavy native modules
+// that are NOT available in Expo Go and cause a synchronous module-load crash that
+// propagates through navigation → App.tsx → white screen with no error shown.
+// Dynamic require means the crash only happens when the user actually triggers AI features,
+// and by that point the ErrorBoundary in App.tsx can surface it properly.
+import type { Tone } from '../services/ai/ToneDetector';
 import { MessageRelay } from '../services/messaging/MessageRelay';
 import { EventBus } from '../services/EventBus';
 import { Audio } from 'expo-av';
@@ -112,6 +117,7 @@ export default function ChatScreen() {
     try {
       const contextText = filteredMessages.slice(0, 10).map(m => `${m.isMe ? 'Me' : m.senderId}: ${m.content}`).join('\n');
       const prompt = `Here are search results for "${searchQuery}" in our local group chat history:\n${contextText}\nProvide a single-sentence, concise summary explaining what was discussed regarding "${searchQuery}". Keep it under 25 words, strictly based on these messages. Do not extrapolate.`;
+      const { AiAdvisor } = require('../services/ai/AiAdvisor');
       const summary = await AiAdvisor.query(prompt);
       setAiSearchSummary(summary);
     } catch (err) {
@@ -176,7 +182,7 @@ export default function ChatScreen() {
   }, [activeChat, activeGroup, addMessage]);
 
   useEffect(() => {
-    AiAdvisor.initialize();
+    try { require('../services/ai/AiAdvisor').AiAdvisor.initialize(); } catch (e) { console.warn('[ChatScreen] AiAdvisor not available in this environment:', e); }
 
     // 1. Load initial messages (mock for now)
     if (messages.length === 0) {
@@ -383,6 +389,7 @@ export default function ChatScreen() {
     
     // Check for tasks in the message
     try {
+        const { AiAdvisor } = require('../services/ai/AiAdvisor');
         const task = await AiAdvisor.extractTasks(newMessage.content);
         if (task) {
              const { useCommitmentStore } = require('../stores/useCommitmentStore');
@@ -448,10 +455,12 @@ export default function ChatScreen() {
     setIsAiLoading(true);
     try {
       // 1. Suggest Reply options
+      const { AiAdvisor } = require('../services/ai/AiAdvisor');
       const suggestions = await AiAdvisor.suggestReplies(lastReceived.content);
       setSuggestedReplies(suggestions);
 
       // 2. Detect Tone (of the last message)
+      const { ToneDetector } = require('../services/ai/ToneDetector');
       const tone = await ToneDetector.detectTone(lastReceived.content);
       setDetectedTone(tone);
     } catch (e) {

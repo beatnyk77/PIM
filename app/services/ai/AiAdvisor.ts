@@ -1,12 +1,24 @@
-import { initLlama, LlamaContext } from 'llama.rn';
+// llama.rn and react-native-fs are heavy native modules NOT available in Expo Go.
+// They are required lazily inside methods rather than at import time so that
+// importing AiAdvisor.ts does not crash the module chain during app startup.
+// When running in Expo Go, all AI features gracefully no-op.
+let _initLlama: typeof import('llama.rn')['initLlama'] | null = null;
+let _LlamaContext: typeof import('llama.rn')['LlamaContext'] | null = null;
+let _RNFS: typeof import('react-native-fs') | null = null;
+try {
+  const llamaRn = require('llama.rn');
+  _initLlama = llamaRn.initLlama;
+  _LlamaContext = llamaRn.LlamaContext;
+} catch (e) { console.warn('[AiAdvisor] llama.rn not available in this environment.'); }
+try { _RNFS = require('react-native-fs'); } catch (e) { console.warn('[AiAdvisor] react-native-fs not available.'); }
+
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
-import RNFS from 'react-native-fs';
 import { EventBus } from '../EventBus';
 import { useStore } from '../storage/StateManager';
 
 class AiAdvisorService {
-  private context: LlamaContext | null = null;
+  private context: any | null = null; // LlamaContext — typed as any to avoid static import
   private isInitializing: boolean = false;
   private modelUri: string = FileSystem.documentDirectory + 'phi-3-mini.gguf';
   private downloadUrl: string = 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf';
@@ -43,7 +55,8 @@ class AiAdvisorService {
       console.log('AiAdvisor: Calculating file SHA-256 hash for integrity validation...');
       // Strip 'file://' if present, react-native-fs expects raw path
       const filePath = uri.replace(/^file:\/\//, '');
-      const hash = await RNFS.hash(filePath, 'sha256');
+      if (!_RNFS) { console.warn('AiAdvisor: RNFS not available, skipping hash check.'); return false; }
+      const hash = await (_RNFS as any).hash(filePath, 'sha256');
       console.log('AiAdvisor: Model SHA-256 calculated:', hash);
       
       const expectedHash = '4fed7364ee3e0c7cb4fe0880148bfdfcd1b630981efa0802a6b62ee52e7da97e';
@@ -151,7 +164,8 @@ class AiAdvisorService {
       console.log('AiAdvisor: Loading model from', localPath);
       
       // 2. Initialize Llama Context with JSI offloading
-      this.context = await initLlama({
+      if (!_initLlama) throw new Error('llama.rn not available in this environment.');
+      this.context = await _initLlama({
         model: localPath,
         use_mlock: true,   // Performance: lock memory to prevent swapping
         n_gpu_layers: 99,  // Performance: offload all layers to Apple Neural Engine / GPU
