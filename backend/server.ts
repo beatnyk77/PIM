@@ -4,13 +4,86 @@ import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 
 const app = express();
-app.use(cors());
+
+// 1. Production CORS allowed origins
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',') 
+  : ['https://app.pim-protocol.org', 'https://pim-client.netlify.app'];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, or local testing)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.indexOf(origin) !== -1 || ALLOWED_ORIGINS.includes('*')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
+
+// 2. Production Security Headers Middleware
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Content-Security-Policy', "default-src 'self'");
+  next();
+});
+
+// 3. In-Memory HTTP Rate Limiter (IP-based)
+const ipLimits = new Map<string, { count: number; resetTime: number }>();
+const LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const MAX_REQUESTS = 100; // max 100 requests per minute
+
+app.use((req, res, next) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  
+  const record = ipLimits.get(ip);
+  if (!record || now > record.resetTime) {
+    ipLimits.set(ip, { count: 1, resetTime: now + LIMIT_WINDOW_MS });
+    next();
+  } else {
+    record.count++;
+    if (record.count > MAX_REQUESTS) {
+      res.status(429).send('Too Many Requests');
+    } else {
+      next();
+    }
+  }
+});
 
 const httpServer = createServer(app);
+
+// 4. Secure Socket.IO Setup with Production CORS
 const io = new Server(httpServer, {
   cors: {
-    origin: "*", // Allow all origins for dev
-    methods: ["GET", "POST"]
+    origin: ALLOWED_ORIGINS,
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
+
+// 5. Socket.IO Rate Limiters (Connection & Packet based)
+const socketLimits = new Map<string, { count: number; resetTime: number }>();
+const MAX_SOCKET_PACKETS_PER_MIN = 300;
+
+io.use((socket, next) => {
+  const ip = socket.handshake.address;
+  const now = Date.now();
+  const record = socketLimits.get(ip);
+  if (!record || now > record.resetTime) {
+    socketLimits.set(ip, { count: 1, resetTime: now + LIMIT_WINDOW_MS });
+    next();
+  } else {
+    record.count++;
+    if (record.count > 10) { // max 10 socket connections per IP per minute
+      return next(new Error('Rate limit exceeded: Too many socket connections'));
+    }
+    next();
   }
 });
 
@@ -28,6 +101,27 @@ const tokenRoutingRegistry = new Map<string, string>();
 
 io.on('connection', (socket: Socket) => {
   const userId = socket.handshake.query.userId as string;
+
+  // Packet rate limiting to prevent spamming
+  socket.use((packet, next) => {
+    const now = Date.now();
+    const record = socketLimits.get(socket.id) || { count: 0, resetTime: now + LIMIT_WINDOW_MS };
+    if (now > record.resetTime) {
+      record.count = 1;
+      record.resetTime = now + LIMIT_WINDOW_MS;
+    } else {
+      record.count++;
+    }
+    socketLimits.set(socket.id, record);
+    
+    if (record.count > MAX_SOCKET_PACKETS_PER_MIN) {
+      console.warn(`[Rate Limit] Socket ${socket.id} (${userId}) exceeded packet rate limit! Disconnecting.`);
+      socket.emit('error', 'Rate limit exceeded: Too many messages sent');
+      socket.disconnect(true);
+      return;
+    }
+    next();
+  });
 
   if (!userId) {
     console.log(`[Connection] Rejected: No userId provided (Socket ID: ${socket.id})`);

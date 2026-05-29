@@ -15,7 +15,13 @@ import CryptoJS from 'crypto-js';
 
 class MessageRelayService {
   private socket: Socket | null = null;
-  private serverUrl: string = 'http://localhost:3000'; 
+  private serverUrl: string = (() => {
+    const envUrl = process.env.EXPO_PUBLIC_RELAY_URL || process.env.RELAY_URL;
+    if (envUrl) {
+      return envUrl;
+    }
+    return 'wss://relay.pim-protocol.net';
+  })();
   private dummyInterval: any = null;
   private revocationRebroadcastInterval: any = null;
 
