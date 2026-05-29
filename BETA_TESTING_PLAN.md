@@ -25,8 +25,25 @@ To maintain absolute privacy, we strictly avoid crashlytics, sentry, or embedded
 * **Bug Reports & Feature Requests:** Submit anonymous GitHub Issues. Please redact any personal metadata from device logs before uploading.
 * **Community Monitoring:** Keep an eye on community Matrix channels or dedicated privacy forums for organic feedback. Monitor GitHub discussions for unhandled edge-cases in the multi-device sync flow.
 
-## Known Limitations (Beta V1)
-1. **Background Socket Drops (iOS):** Due to aggressive iOS background task termination, long-lived WebSockets may drop when the app is backgrounded.
-2. **Local AI Memory Usage:** The `llama.rn` GGUF models require 2GB+ of free RAM. Older devices may experience thermal throttling or OOM crashes. (Use **Lite Mode** if this occurs).
-3. **Relay Uptime:** The default relay node is stateless and best-effort. Self-hosting the relay server is highly recommended for production-critical deployments.
+## ⚠️ Known Limitations & Known Issues (Private Beta v0.9.0-beta.2)
+
+For beta testing purposes, researchers and testers should evaluate behaviors with the following design boundaries and early software issues in mind:
+
+### 🛡️ Architectural Limitations (Decentralized & Zero-Knowledge by Design)
+1. **Stateless Relay Message Queueing:**
+   * **Limitation:** The default production relay server operates as a completely stateless, amnesiac router and retains no persistent database buffers.
+   * **Consequence:** If a peer is completely disconnected when a message is dispatched, the packet is instantly dropped.
+   * **Test Case:** Test message exchange with a recipient online, and then with a recipient manually disconnected. Observe that offline envelopes are dropped unless utilizing a private self-hosted relay with active caching enabled.
+2. **Decoy Partition Cryptographic Isolation:**
+   * **Limitation:** The Plausible Deniability Decoy Vault runs an independent database container (`pim-decoy-db.sqlite`) derived from a separate PBKDF2 passphrase chain.
+   * **Consequence:** Real database profiles, contacts, and keys do not sync to the decoy partition. This isolation is mathematically required to guarantee absolute deniability under coercion.
+
+### 🐛 Known Issues (Active Beta Resolution Path)
+1. **Aggressive Background Socket Drops (iOS):**
+   * **Issue:** WebSocket connections are frequently terminated by the iOS daemon if the client remains backgrounded for more than 30–60 seconds.
+   * **Workaround/Status:** Opening the app triggers an instant secure reconnection and forward-secret key-exchange handshake. Silent APNs background wake sweeps are scheduled for the next release (`v0.9.0-beta.3`).
+2. **Local AI Memory & Thermal Demands:**
+   * **Issue:** The quantized local `phi-3-mini` GGUF model via `llama.rn` requires a minimum of 2.2GB of continuous resident RAM. Legacy mobile hardware may experience minor thermal spikes or out-of-memory app crashes during intensive token generation.
+   * **Workaround/Status:** Toggle **Lite Mode** in settings on legacy devices to bypass local LLM initialization, substituting AI search features with timing-shielded noise padding sweeps.
+
 

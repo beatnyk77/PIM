@@ -456,11 +456,6 @@ export class GroupSessionManagerClass {
     console.log(`[GroupSessionManager] Validating invite token ${token}`);
     const raw = await getSignalStoreValue(`invite_token:${token}`);
     if (!raw) {
-      if (token.startsWith('mock_') || token.includes('group_') || token.includes('test')) {
-        const parts = token.split('_');
-        const groupId = parts[1] ? `group_${parts[1]}` : 'test-group';
-        return { status: 'valid', groupId };
-      }
       return { status: 'invalid' };
     }
 

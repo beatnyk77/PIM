@@ -421,37 +421,18 @@ export class IdentityService {
       // Ensure primary device (deviceId = 1) is always in the list
       if (!list.some(d => d.deviceId === 1)) {
         const keys = await this.loadKeys();
-        const primaryPub = keys ? arrayBufferToBase64(keys.identityKey) : 'MOCK_PRIMARY_PUBKEY_BASE64_FINGERPRINT_DATA_VAL_1';
-        list.unshift({
-          deviceId: 1,
-          publicKey: primaryPub,
-          addedAt: Date.now() - 30 * 24 * 3600 * 1000,
-          nickname: 'Primary iPhone (This Device)',
-          lastActive: Date.now(),
-          platform: 'ios'
-        });
-        await SecureStore.setItemAsync('linked_devices_v1', JSON.stringify(list));
-      }
-      
-      // For demonstration / test convenience, let's also ensure there's at least one secondary device in settings UI
-      if (list.length === 1) {
-        list.push({
-          deviceId: 45,
-          publicKey: 'MOCK_SECONDARY_PUBKEY_BASE64_FINGERPRINT_DATA_VAL_45',
-          addedAt: Date.now() - 5 * 24 * 3600 * 1000,
-          nickname: "Bob's iPad Pro",
-          lastActive: Date.now() - 3600 * 1000,
-          platform: 'ios'
-        });
-        list.push({
-          deviceId: 99,
-          publicKey: 'MOCK_SECONDARY_PUBKEY_BASE64_FINGERPRINT_DATA_VAL_99',
-          addedAt: Date.now() - 12 * 24 * 3600 * 1000,
-          nickname: "Linux Desktop Workstation",
-          lastActive: Date.now() - 24 * 3600 * 1000,
-          platform: 'desktop'
-        });
-        await SecureStore.setItemAsync('linked_devices_v1', JSON.stringify(list));
+        if (keys) {
+          const primaryPub = arrayBufferToBase64(keys.identityKey);
+          list.unshift({
+            deviceId: 1,
+            publicKey: primaryPub,
+            addedAt: Date.now() - 30 * 24 * 3600 * 1000,
+            nickname: 'Primary iPhone (This Device)',
+            lastActive: Date.now(),
+            platform: 'ios'
+          });
+          await SecureStore.setItemAsync('linked_devices_v1', JSON.stringify(list));
+        }
       }
 
       return list;

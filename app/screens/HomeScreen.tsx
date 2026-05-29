@@ -2,7 +2,7 @@ import { View, Text, Button, FlatList, TouchableOpacity, SafeAreaView, Alert, Mo
 import { useNavigation } from '@react-navigation/native';
 import { useStore } from '../services/storage/StateManager';
 import { useEffect, useState } from 'react';
-import { IdentityService } from '../services/auth/IdentityService';
+import { IdentityService, arrayBufferToBase64 } from '../services/auth/IdentityService';
 import { MessageRelay } from '../services/messaging/MessageRelay';
 import { EventBus } from '../services/EventBus';
 import { SafetyCheckWizard } from '../components/SafetyCheckWizard';
@@ -156,11 +156,13 @@ export default function HomeScreen() {
       setShowJoinModal(false);
 
       const keys = await IdentityService.loadKeys();
-      const myId = keys ? keys.registrationId.toString() : 'me';
+      if (!keys) {
+        throw new Error("Local identity keys not found. Please setup identity first.");
+      }
       const myNode = {
-        userId: myId,
-        deviceId: keys ? keys.deviceId : 1,
-        identityKey: keys ? keys.identityKey.toString() : 'mock-key',
+        userId: keys.registrationId.toString(),
+        deviceId: keys.deviceId,
+        identityKey: arrayBufferToBase64(keys.identityKey),
         role: 'member' as const
       };
 

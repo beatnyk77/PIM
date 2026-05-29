@@ -37,3 +37,19 @@ At **Private Intelligence Messenger (PIM)**, we built a system that fundamentall
 * **Symmetrically Encrypted Media Envelopes:** All media attachments (e.g. images) are encrypted symmetrically on-device before broadcast. They are wrapped inside formatted JSON media envelopes and securely relayed within MLS-aligned E2EE sessions, ensuring the relay server can never view or parse files.
 * **Local Group Summarization:** Search histories and conversational summarizations are computed 100% on-device by the quantized LLM. Search patterns never traverse a server or network, eliminating any cloud leak threat.
 
+---
+
+## 🛡️ Limitations of the Threat Model (Honest Disclosure)
+
+While PIM provides military-grade mathematical guarantees for end-to-end encryption, local databases, and zero-telemetry operations, users must understand the boundaries of our security model:
+
+1. **Compromised Operating Systems & Keyloggers:**
+   * **Boundary:** If the host mobile operating system (iOS or Android) is compromised via rootkits, kernel exploits, custom keyboard recorders, or malware-directed screen captures, the on-device memory can be read before encryption occurs. PIM assumes a clean, trustworthy host OS.
+2. **Physical Capture of an Unlocked Session:**
+   * **Boundary:** If a device is captured physically while unlocked and active, and the user is prevented from executing the face-down Panic Flip or typing the Decoy passcode, an attacker will be able to read active threads directly from the interface.
+3. **Stateless Relay Message Dropping:**
+   * **Boundary:** PIM's zero-knowledge relay server stores nothing. If you send a message while a recipient is completely offline and disconnected, the packet is permanently dropped. High-availability environments should consider a private, self-hosted relay with a temporary database cache.
+4. **Active Metadata Leaks on Network-Level Inspection:**
+   * **Boundary:** While PIM uses background token batching and randomized decoy packets to obscure conversational frequencies, a nation-state observer sniffing network routers can still determine that the device is communicating with the PIM relay's IP address. Using a high-quality VPN or Tor is recommended to shield connection destinations.
+
+

@@ -58,13 +58,26 @@ For the initial public beta, we bypass traditional app stores to maintain indepe
 2. Install the application manually on your device.
 3. Upon first launch, the **Safety Check Wizard** will validate your cryptographic enclave and secure database mount.
 
----
+## ⚠️ Known Limitations & Known Issues (Private Beta v0.9.0-beta.2)
 
-## ⚠️ Known Limitations (Beta V1)
-1. **Background Socket Drops (iOS):** Due to aggressive iOS background task termination, long-lived WebSockets may drop when the app is backgrounded.
-2. **Local AI Memory Usage:** The `llama.rn` GGUF models require 2GB+ of free RAM. Older devices may experience thermal throttling or OOM crashes.
-3. **Lite Mode:** If you experience battery drain or crashes, enable **Lite Mode** in Settings. This completely disables local AI processing and uses lighter cryptographic padding.
-4. **Relay Uptime:** The default relay node is stateless and best-effort. Self-hosting the relay server is highly recommended for production-critical deployments.
+PIM is currently in an active **Controlled Private Beta** development phase under version `v0.9.0-beta.2`. While our core cryptographic envelopes (Dual-Layer ML-KEM + Signal) and local database encryption layers (SQLCipher AES-256-XTS) are mathematically hardened, the system exhibits several design boundaries and early-stage software limitations:
+
+### 🛡️ Architectural Limitations (Decentralized & Zero-Knowledge by Design)
+1. **Stateless Relay Amnesia:**
+   * **Limitation:** To ensure absolute zero-telemetry and metadata shielding, the default relay server is completely state-free and zero-knowledge. It operates without a persistent database and retains no message queue queues.
+   * **Consequence:** If a recipient is completely offline at the exact millisecond a direct or group message is transmitted, the server drops the packet instantly.
+   * **Mitigation:** For critical, high-availability deployments, self-hosting a private relay with a transient PostgreSQL cache is recommended (see [relay_deployment.md](file:///Users/kartikaysharma/.gemini/antigravity-ide/brain/bff7db43-e758-455e-b241-c2f8aed24787/relay_deployment.md)).
+2. **Decoy Partition Cryptographic Isolation:**
+   * **Limitation:** The Plausible Deniability Decoy Vault runs an independent SQLite database container (`pim-decoy-db.sqlite`) derived from a separate PBKDF2 passphrase chain.
+   * **Consequence:** Real contacts, secure keys, and messaging histories never cross over or synchronize with the decoy partition. This isolation is a strict cryptographic requirement; any data bridge would leave structural traces, instantly defeating plausible deniability under inspection.
+
+### 🐛 Known Issues (Active Beta Resolution Path)
+1. **Aggressive Background Socket Drops (iOS):**
+   * **Issue:** Due to aggressive iOS operating system background process daemon controls, idle WebSockets are systematically severed within 30–60 seconds of client backgrounding.
+   * **Status:** Under active engineering. The app instantly executes a secure reconnect and forward-secret key-exchange handshaking sequence the moment it is brought back to the foreground. APNs (Apple Push Notification service) silent background wake support is scheduled for `v0.9.0-beta.3`.
+2. **Local AI Memory Allocations & Thermals:**
+   * **Issue:** Loading and running the quantized `phi-3-mini` GGUF model via the `llama.rn` engine requires at least 2.2GB of continuous resident RAM. This can lead to heavy battery consumption, minor thermal throttling, or out-of-memory (OOM) app crashes on legacy mobile devices.
+   * **Status:** Mitigated. Users on resource-constrained hardware can toggle **Lite Mode** in settings to completely bypass local LLM initialization, substituting AI search features with high-speed timing-shielded noise padding sweeps.
 
 ---
 
