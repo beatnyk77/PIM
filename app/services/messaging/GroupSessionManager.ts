@@ -7,7 +7,7 @@ import {
   getGroupSenderKeyFromDb
 } from '../storage/LocalDb';
 import { EncryptionService } from './EncryptionService';
-import { IdentityService } from '../auth/IdentityService';
+import { IdentityService, arrayBufferToBase64 } from '../auth/IdentityService';
 import { EventBus } from '../EventBus';
 import CryptoJS from 'crypto-js';
 
@@ -68,7 +68,7 @@ export class GroupSessionManagerClass {
         roster.push({
           userId: myId,
           deviceId: keys.deviceId,
-          identityKey: CryptoJS.SHA256(keys.identityKey.toString()).toString(),
+          identityKey: arrayBufferToBase64(keys.identityKey),
           status: 'active',
           role: 'admin'
         });

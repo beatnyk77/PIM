@@ -48,13 +48,12 @@ class AiAdvisorService {
       
       const expectedHash = '4fed7364ee3e0c7cb4fe0880148bfdfcd1b630981efa0802a6b62ee52e7da97e';
       
-      // In development/test, we want to allow any downloaded model if we are testing with a smaller mock,
-      // but warn if it doesn't match the expected full model hash.
       if (hash !== expectedHash) {
-        console.warn(`AiAdvisor: SHA-256 mismatch! Expected ${expectedHash}, got ${hash}. Continuing in fallback dev mode.`);
-      } else {
-        console.log('AiAdvisor: SHA-256 verification succeeded. Integrity verified.');
+        console.warn(`AiAdvisor: SHA-256 mismatch! Expected ${expectedHash}, got ${hash}. Blocking load.`);
+        return false;
       }
+      
+      console.log('AiAdvisor: SHA-256 verification succeeded. Integrity verified.');
       return true;
     } catch (e) {
       console.error('AiAdvisor: Failed to compute model hash', e);

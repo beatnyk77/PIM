@@ -5,6 +5,7 @@ import { GroupSessionManager } from '../services/messaging/GroupSessionManager';
 import { MessageRelay } from '../services/messaging/MessageRelay';
 import { useStore } from '../services/storage/StateManager';
 import GroupQrCode from '../components/GroupQrCode';
+import CryptoJS from 'crypto-js';
 
 export default function GroupCreationScreen() {
   const navigation = useNavigation<any>();
@@ -16,6 +17,11 @@ export default function GroupCreationScreen() {
   const [isCreating, setIsCreating] = useState(false);
   const [isEphemeralLink, setIsEphemeralLink] = useState(true); // Default to one-time / ephemeral
   const [copyFeedback, setCopyFeedback] = useState(false);
+
+  const [groupId] = useState(() => `group_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
+  const [inviteToken] = useState(() => {
+    return CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
+  });
 
   const handleCopyLink = () => {
     const link = generateInviteLink();
@@ -40,19 +46,26 @@ export default function GroupCreationScreen() {
     setIsCreating(true);
 
     try {
-      // 1. Generate unique Group ID
-      const groupId = `group_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      // 1. Fetch real identity keys from server/IdentityService for group members
+      const initialMembers = [];
+      for (const userId of members) {
+        const bundle = await MessageRelay.fetchPreKeyBundle(userId);
+        if (!bundle || !bundle.identityKey) {
+          throw new Error(`Failed to fetch prekey bundle for member: ${userId}`);
+        }
+        initialMembers.push({
+          userId,
+          deviceId: bundle.deviceId || 1,
+          identityKey: bundle.identityKey,
+          role: 'member' as const
+        });
+      }
 
-      // 2. Prepare initial roster (mocking deviceId as 1 for added members)
-      const initialMembers = members.map(userId => ({
-        userId,
-        deviceId: 1, // Defaulting to 1 for mock
-        identityKey: 'mock-identity-key-for-' + userId,
-        role: 'member' as const
-      }));
-
-      // 3. Create Group Session in MLS Manager
+      // 2. Create Group Session in MLS Manager
       await GroupSessionManager.createGroupSession(groupId, initialMembers);
+
+      // 3. Register the invite token for this group
+      await GroupSessionManager.registerInviteToken(groupId, inviteToken, isEphemeralLink);
 
       // 4. Join Group in Relay
       MessageRelay.joinGroup(groupId);
@@ -60,16 +73,19 @@ export default function GroupCreationScreen() {
       // 5. Set active group and navigate
       setActiveGroup(groupId);
       navigation.replace('Chat'); // replace so back button doesn't go to creation
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to create group', e);
+      const { Alert } = require('react-native');
+      Alert.alert("Failed to Create Group", e.message || "An unexpected cryptographic error occurred.");
     } finally {
       setIsCreating(false);
     }
   };
 
   const generateInviteLink = () => {
-    const base = `pim://group/join/mock_${Date.now()}`;
-    return isEphemeralLink ? `${base}?ephemeral=true` : base;
+    const base = `pim://group/join/${groupId}`;
+    const params = `token=${inviteToken}&burn=${isEphemeralLink}`;
+    return `${base}?${params}`;
   };
 
   return (

@@ -11,6 +11,9 @@ export default function SettingsScreen() {
   const [showLinkedDevicesScreen, setShowLinkedDevicesScreen] = React.useState(false);
   const [linkedDevices, setLinkedDevices] = React.useState<any[]>([]);
 
+  const [activeTransferPin, setActiveTransferPin] = React.useState<string | null>(null);
+  const [activeTransferPayload, setActiveTransferPayload] = React.useState<string | null>(null);
+
   React.useEffect(() => {
     if (showLinkedDevicesScreen) {
       IdentityService.getLinkedDevices().then(setLinkedDevices);
@@ -436,10 +439,13 @@ export default function SettingsScreen() {
           <View className="flex-row justify-between">
             <TouchableOpacity 
               onPress={async () => {
-                const payload = await IdentityService.generateD2DTransferPayload('123456');
+                const pin = Math.floor(10000000 + Math.random() * 90000000).toString(); // 8 digits
+                const payload = await IdentityService.generateD2DTransferPayload(pin);
                 if (payload) {
+                  setActiveTransferPin(pin);
+                  setActiveTransferPayload(payload);
                   Alert.alert(
-                    "🔑 QR Payload Generated (PIN: 123456)",
+                    `🔑 QR Payload Generated (PIN: ${pin})`,
                     `Share this secure, encrypted transient package with your secondary device:\n\n${payload.substring(0, 150)}...`,
                     [{ text: "OK" }]
                   );
@@ -454,21 +460,20 @@ export default function SettingsScreen() {
 
             <TouchableOpacity 
               onPress={async () => {
-                // Simulate secondary device scanning/importing Bob's payload
-                const mockPin = '123456';
-                const mockPayload = await IdentityService.generateD2DTransferPayload(mockPin);
-                if (mockPayload) {
-                  const decoded = await IdentityService.decodeD2DPayload(mockPayload, mockPin);
-                  if (decoded) {
-                    const success = await IdentityService.confirmD2DImport(decoded.rawPayload);
-                    if (success) {
-                      Alert.alert("Success", "E2EE and hybrid post-quantum identity keys successfully imported onto this secondary device! Isolated ratchets instantiated.");
-                    } else {
-                      Alert.alert("Error", "Key import confirmation failed.");
-                    }
+                if (!activeTransferPayload || !activeTransferPin) {
+                  Alert.alert("No Active Transfer", "Please export the key payload first to generate a transient PIN and payload.");
+                  return;
+                }
+                const decoded = await IdentityService.decodeD2DPayload(activeTransferPayload, activeTransferPin);
+                if (decoded) {
+                  const success = await IdentityService.confirmD2DImport(decoded.rawPayload);
+                  if (success) {
+                    Alert.alert("Success", "E2EE and hybrid post-quantum identity keys successfully imported onto this secondary device! Isolated ratchets instantiated.");
                   } else {
-                    Alert.alert("Error", "Key decryption failed.");
+                    Alert.alert("Error", "Key import confirmation failed.");
                   }
+                } else {
+                  Alert.alert("Error", "Key decryption failed.");
                 }
               }}
               className="bg-gray-800 flex-1 ml-2 py-2 rounded-lg items-center"
