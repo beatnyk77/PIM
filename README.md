@@ -81,6 +81,83 @@ PIM is currently in an active **Controlled Private Beta** development phase unde
 
 ---
 
+## 🌐 Deployment (Monorepo Production Relay)
+
+PIM is structured as a monorepo containing the native client in `/app` and the stateless E2EE relay server in `/backend`. Deploying the relay is simplified using our root-level scripts, robust Docker configurations, and support for monorepo-friendly cloud platforms.
+
+### 1. Root-Level Script Orchestration
+You can manage the monorepo from the root directory using standard npm commands:
+*   **Install Backend Dependencies:** `npm run install:backend`
+*   **Build Backend Server:** `npm run build:backend`
+*   **Start Backend Relay:** `npm run start:backend`
+*   **Run Backend in Development:** `npm run dev:backend`
+*   **Check Mobile App TypeScript Compilation:** `npm run tsc:app`
+
+---
+
+### 2. Platform Deployment Configurations
+
+#### 🚄 Railway (Recommended - Easiest Setup)
+Railway provides native support for monorepos by specifying a service sub-root:
+1. Create a new Railway project and link it to your GitHub repository.
+2. Under service settings, set the **Root Directory** to `backend`.
+3. Railway will automatically detect the `backend/Dockerfile` and compile the multi-stage container.
+4. Set the required **Environment Variables**:
+   *   `PORT=3000` (or leave default, bound dynamically)
+   *   `ALLOWED_ORIGINS=https://app.pim-protocol.org,https://pim-client.netlify.app`
+5. Generate a public domain (e.g., `relay.pim-protocol.net`), providing automatic SSL (`https`/`wss`).
+6. Point your client EAS build configuration to this URL: `EXPO_PUBLIC_RELAY_URL=wss://your-relay-domain.net`.
+
+#### 🎈 Fly.io
+To deploy on Fly.io, manage the deployment from the `/backend` subdirectory:
+1. Make sure you have the Fly CLI installed and are authenticated (`fly auth login`).
+2. Navigate to the backend directory:
+   ```bash
+   cd backend
+   ```
+3. Initialize the application config (creates `fly.toml`):
+   ```bash
+   fly launch --dockerfile Dockerfile
+   ```
+4. Define your environment variables in `fly.toml` or set them via CLI:
+   ```bash
+   fly secrets set ALLOWED_ORIGINS="https://app.pim-protocol.org,https://pim-client.netlify.app"
+   ```
+5. Deploy the application:
+   ```bash
+   fly deploy
+   ```
+
+#### 🐳 Docker Standalone (VPS / Custom Cloud Host)
+To compile and execute the secure multi-stage Docker container locally or on a standard Linux virtual private server:
+
+*   **Option A: Build from Repository Root (Standard Monorepo Context)**
+    Execute the build specifying the backend path as a build argument:
+    ```bash
+    docker build -t pim-backend --build-arg CONTEXT_DIR=backend -f backend/Dockerfile .
+    ```
+    
+*   **Option B: Build inside the Backend Subdirectory**
+    Navigate to the directory and run a standard docker build:
+    ```bash
+    cd backend
+    docker build -t pim-backend .
+    ```
+
+*   **Running the Container**
+    Run the production container, mapping port `3000` and defining environment limits:
+    ```bash
+    docker run -d \
+      -p 3000:3000 \
+      -e PORT=3000 \
+      -e NODE_ENV=production \
+      -e ALLOWED_ORIGINS="https://app.pim-protocol.org,https://pim-client.netlify.app" \
+      --name pim-relay-server \
+      pim-backend
+    ```
+
+---
+
 ## 🧪 Running Security & Integration Tests
 
 PIM features an automated cryptographic audit and security threat validation test suite.

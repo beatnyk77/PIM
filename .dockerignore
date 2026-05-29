@@ -1,0 +1,31 @@
+# ==========================================
+# PIM Docker Ignore: Monorepo Clean Context
+# ==========================================
+
+# Exclude Git metadata and IDE settings
+.git
+.github
+.idea
+.vscode
+.expo
+.tmp-tests
+
+# Exclude native client-side caches and builds (wont be needed by backend relay)
+app/node_modules
+app/.expo
+app/dist
+app/web-build
+app/ios
+app/android
+app/assets
+
+# Exclude local backend modules and build targets
+backend/node_modules
+backend/dist
+
+# Exclude system and logs
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

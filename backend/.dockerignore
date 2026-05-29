@@ -1,0 +1,6 @@
+# Exclude local modules and build files
+node_modules
+dist
+.env
+.DS_Store
+*.log
