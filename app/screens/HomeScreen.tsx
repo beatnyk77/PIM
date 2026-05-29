@@ -16,14 +16,75 @@ export default function HomeScreen() {
   const [inviteLinkInput, setInviteLinkInput] = useState('');
   const [invitePasswordInput, setInvitePasswordInput] = useState('');
 
-  // Derive conversations from messages (simple logic for MVP)
-  // Group messages by senderId or groupId to form conversation list
-  // For now, we keep the static list but ideally we map `messages` to this.
-  const conversations = [
-      { id: 'test-chat-id', name: 'Alice (Test)', type: 'direct', lastMessage: 'Secure message...' },
-      { id: 'group-123', name: 'Project Alpha', type: 'group', lastMessage: 'Meeting at 5' },
-      // Add dynamic extraction later
-  ];
+  const [conversations, setConversations] = useState<any[]>([]);
+
+  useEffect(() => {
+    const buildConversations = async () => {
+      const conversationMap = new Map<string, any>();
+
+      // 1. Fetch all MLS groups from the Signal store
+      const activeGroups = await GroupSessionManager.getAllGroups();
+      for (const group of activeGroups) {
+        conversationMap.set(group.groupId, {
+          id: group.groupId,
+          name: `👥 Group: ${group.groupId}`,
+          type: 'group',
+          lastMessage: 'No messages yet',
+          timestamp: 0
+        });
+      }
+
+      // 2. Iterate through messages to populate last message and derive direct chats
+      for (const m of messages) {
+        const msgTime = new Date(m.timestamp).getTime();
+        if (m.groupId) {
+          // Group message
+          const existing = conversationMap.get(m.groupId);
+          if (!existing || msgTime > existing.timestamp) {
+            conversationMap.set(m.groupId, {
+              id: m.groupId,
+              name: `👥 Group: ${m.groupId}`,
+              type: 'group',
+              lastMessage: m.content,
+              timestamp: msgTime
+            });
+          }
+        } else {
+          // 1:1 message
+          const contactId = m.isMe ? 'user2' : m.senderId; // Fallback to 'user2' if sent by me
+          if (contactId === 'system') continue;
+          
+          const existing = conversationMap.get(contactId);
+          if (!existing || msgTime > existing.timestamp) {
+            conversationMap.set(contactId, {
+              id: contactId,
+              name: `👤 Chat with ${contactId}`,
+              type: 'direct',
+              lastMessage: m.content,
+              timestamp: msgTime
+            });
+          }
+        }
+      }
+
+      // 3. Ensure default user2 is always present if no direct chat was derived
+      if (!conversationMap.has('user2')) {
+        conversationMap.set('user2', {
+          id: 'user2',
+          name: '👤 Chat with user2',
+          type: 'direct',
+          lastMessage: 'No messages yet',
+          timestamp: 0
+        });
+      }
+
+      // Convert map to array and sort by timestamp descending (newest messages first)
+      const list = Array.from(conversationMap.values());
+      list.sort((a, b) => b.timestamp - a.timestamp);
+      setConversations(list);
+    };
+    buildConversations();
+  }, [messages]);
 
   useEffect(() => {
     // Hydrate store from DB
@@ -162,7 +223,9 @@ export default function HomeScreen() {
                     <Text className="text-base font-semibold text-gray-900">{item.name}</Text>
                     <Text className="text-gray-500 text-sm" numberOfLines={1}>{item.lastMessage}</Text>
                 </View>
-                <Text className="text-gray-400 text-xs">Now</Text>
+                <Text className="text-gray-400 text-xs">
+                  {item.timestamp > 0 ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                </Text>
             </TouchableOpacity>
         )}
         ListEmptyComponent={

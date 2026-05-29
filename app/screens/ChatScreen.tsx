@@ -253,15 +253,7 @@ export default function ChatScreen() {
     };
   }, [addMessage, updateMessageStatus, activeGroup]);
 
-  // Toggle Group Mode for testing
-  const toggleGroupMode = () => {
-      if (activeGroup) {
-          setActiveChat('user2'); // Switch back to DM
-      } else {
-          setActiveGroup('test-group'); // Switch to Group
-          MessageRelay.joinGroup('test-group');
-      }
-  };
+
 
   async function startRecording() {
     try {
@@ -474,22 +466,27 @@ export default function ChatScreen() {
     <SafeAreaView className="flex-1 bg-white">
       {/* Header */}
       <View className="p-4 border-b border-gray-200 flex-row justify-between items-center bg-gray-50/50">
-        <View className="flex-1 mr-2">
-          <View className="flex-row items-center">
-            <Text className="text-lg font-bold text-gray-900" numberOfLines={1}>
-                {activeGroup ? `Group: ${activeGroup}` : `Chat with ${activeChat}`}
-            </Text>
-            {!activeGroup && safetyNumber && (
-              <TouchableOpacity onPress={() => setShowSafetyModal(true)} className="ml-2 bg-green-50 px-2 py-0.5 rounded-full border border-green-200 flex-row items-center">
-                <Text className="text-[10px] text-green-700 font-bold">🔒 Verified</Text>
-              </TouchableOpacity>
+        <View className="flex-row items-center flex-1">
+          <TouchableOpacity onPress={() => navigation.goBack()} className="mr-3 p-1">
+            <Text className="text-blue-500 font-semibold text-base">⬅️ Back</Text>
+          </TouchableOpacity>
+          <View className="flex-1 mr-2">
+            <View className="flex-row items-center flex-wrap">
+              <Text className="text-lg font-bold text-gray-900" numberOfLines={1}>
+                  {activeGroup ? `Group: ${activeGroup}` : `Chat with ${activeChat}`}
+              </Text>
+              {!activeGroup && safetyNumber && (
+                <TouchableOpacity onPress={() => setShowSafetyModal(true)} className="ml-2 bg-green-50 px-2 py-0.5 rounded-full border border-green-200 flex-row items-center">
+                  <Text className="text-[10px] text-green-700 font-bold">🔒 Verified</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            {detectedTone && (
+              <Text className="text-xs text-gray-500 mt-0.5">
+                Current Tone: <Text className="font-semibold text-purple-600 capitalize">{detectedTone}</Text>
+              </Text>
             )}
           </View>
-          {detectedTone && (
-            <Text className="text-xs text-gray-500 mt-0.5">
-              Current Tone: <Text className="font-semibold text-purple-600 capitalize">{detectedTone}</Text>
-            </Text>
-          )}
         </View>
         <View className="flex-row items-center gap-3">
             {activeGroup && (
@@ -506,9 +503,6 @@ export default function ChatScreen() {
                 </TouchableOpacity>
               </View>
             )}
-            <TouchableOpacity onPress={toggleGroupMode}>
-                <Text className="text-gray-500 font-semibold text-sm">{activeGroup ? 'Exit' : 'Join Group'}</Text>
-            </TouchableOpacity>
         </View>
       </View>
 

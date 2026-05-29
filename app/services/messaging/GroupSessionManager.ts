@@ -98,6 +98,24 @@ export class GroupSessionManagerClass {
     return raw ? JSON.parse(raw) : [];
   }
 
+  async getAllGroups(): Promise<MLSGroupContext[]> {
+    try {
+      const { database } = require('../storage/LocalDb');
+      const collection = database.get('signal_store');
+      const entries = await collection.query().fetch();
+      const groups: MLSGroupContext[] = [];
+      for (const entry of entries) {
+        if (entry.entryKey.startsWith(GroupSessionManagerClass.CONTEXT_PREFIX)) {
+          groups.push(JSON.parse(entry.entryValue));
+        }
+      }
+      return groups;
+    } catch (e) {
+      console.error('[GroupSessionManager] Failed to get all groups:', e);
+      return [];
+    }
+  }
+
   private async saveRoster(groupId: string, roster: GroupMember[]): Promise<void> {
     await saveSignalStoreValue(GroupSessionManagerClass.ROSTER_PREFIX + groupId, JSON.stringify(roster));
   }
