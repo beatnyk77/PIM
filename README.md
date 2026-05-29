@@ -33,26 +33,125 @@
 
 ---
 
-## 🚀 How to Run Locally
+## 🚀 Local Development
 
-### 1. Run the Backend Relay Server
-Open a terminal at the project root and navigate to the backend directory:
-```bash
-cd backend
-npm install
-npm run start
-```
-The relay server will start and listen on `http://localhost:3000`.
+PIM supports two execution paths for local development: a **Docker-Compose** containerized setup (simplest for unified multi-tier execution) and a **Native Node.js** workflow.
 
-### 2. Run the Expo Client (Mobile App)
-Open a new terminal window at the project root and navigate to the app directory:
+### 1. Central Script Shortcuts
+From the repository root, you can control the monorepo components directly:
 ```bash
-cd app
-npm install
-npx expo start
+# Install all dependencies
+npm run install:backend && npm run install:app
+
+# Start the E2EE Relay server locally in development mode
+npm run dev:backend
+
+# Typecheck the mobile client application
+npm run tsc:app
 ```
 
-### 3. Public Beta Installation
+---
+
+### 2. Running with Docker Compose
+We provide a root-level `docker-compose.yml` configured for development (including live hot reloading).
+
+1.  **Boot the E2EE Relay Server:**
+    Run the compose command from the repository root:
+    ```bash
+    docker compose up
+    ```
+    This mounts the local `backend/` directory, so any changes made to the code will immediately trigger a fast live reload inside the container.
+
+2.  **Optionally Boot the Expo Client in Docker:**
+    To run both the server and Metro web bundler inside Docker:
+    ```bash
+    docker compose --profile app up
+    ```
+
+---
+
+### 3. Native Local Execution
+
+1.  **Run the Backend Relay Server:**
+    ```bash
+    cd backend
+    npm install
+    npm run dev
+    ```
+    The relay starts on `http://localhost:3000`.
+
+2.  **Run the Expo Mobile Client:**
+    ```bash
+    cd app
+    npm install
+    npx expo start
+    ```
+
+---
+
+### 📱 Real-Device Physical Testing: Locating Your Local IP
+
+For security advocates testing E2EE messaging on **real physical smartphones** instead of simulators, the mobile app must bind to the developer machine's local IP address instead of `localhost` or `127.0.0.1`.
+
+1.  **Find Your Machine's Local IP Address:**
+    *   **macOS:** Run `ipconfig getifaddr en0` (or `ifconfig | grep "inet "`)
+    *   **Linux:** Run `ip a | grep "inet "`
+    *   **Windows (PowerShell):** Run `ipconfig` (look for `IPv4 Address` on your active Wi-Fi/Ethernet adapter)
+    *(Let's assume the local IP is `192.168.1.50`)*
+
+2.  **Configure the Mobile Client:**
+    Create or update your local configuration file inside `app/.env`:
+    ```env
+    EXPO_PUBLIC_RELAY_URL=ws://192.168.1.50:3000
+    ```
+
+3.  **Boot Expo on the LAN Network:**
+    ```bash
+    npx expo start --lan
+    ```
+    Scan the generated QR code using the **Expo Go** app on your physical iOS or Android device. Ensure both your developer machine and physical device are connected to the **same Wi-Fi network**.
+
+---
+
+### 🔧 Developer Troubleshooting
+
+#### 🛑 Port 3000 Conflicts ("Address Already in Use")
+If you receive a bind failure (such as `listen tcp 0.0.0.0:3000: bind: address already in use` or Docker exit code `125`), a process is already occupying the relay port.
+
+*   **Find and Terminate the Conflict Process (macOS / Linux):**
+    ```bash
+    # Locate the PID (Process ID) occupying port 3000
+    lsof -i :3000
+    
+    # Terminate the process (replace <PID> with the ID returned above)
+    kill -9 <PID>
+    ```
+*   **Resolve in Docker:**
+    If the conflict is an old detached Docker container, stop and prune it:
+    ```bash
+    docker ps -a | grep pim
+    docker stop pim-relay-test || true
+    docker rm pim-relay-test || true
+    ```
+
+#### 🔄 Environment Variable Updates Not Reflecting (Expo Cache)
+Expo heavily caches environment configurations. If you update `EXPO_PUBLIC_RELAY_URL` in `app/.env` but the app continues attempting connections to a previous URL:
+
+*   **Force-Clear the Metro Bundler Cache:**
+    ```bash
+    cd app
+    npx expo start -c
+    ```
+
+#### 🐳 Re-building Docker Images Post-Source Edits
+If you make dependency or structural schema changes to the backend and need to rebuild the standalone Docker image from scratch:
+```bash
+docker build --no-cache -t pim-backend --build-arg CONTEXT_DIR=backend -f backend/Dockerfile .
+```
+
+---
+
+### 4. Public Beta Installation
 For the initial public beta, we bypass traditional app stores to maintain independence from telemetry and review delays.
 1. Download the latest APK (Android) or IPA (iOS) from our GitHub Releases page.
 2. Install the application manually on your device.

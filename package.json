@@ -4,6 +4,8 @@
   "private": true,
   "description": "Private Intelligence Messenger (PIM) Monorepo root configuration",
   "scripts": {
+    "build": "npm --prefix backend install && npm --prefix backend run build",
+    "start": "npm --prefix backend start",
     "install:backend": "cd backend && npm install",
     "build:backend": "cd backend && npm run build",
     "start:backend": "cd backend && npm start",

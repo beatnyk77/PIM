@@ -28,7 +28,9 @@ class MessageRelayService {
   connect(userId: string) {
     if (this.socket?.connected) return;
 
-    console.log('MessageRelay: Connecting anonymously to', this.serverUrl);
+    console.log(`[MessageRelay] 🔌 Initializing socket connection...`);
+    console.log(`[MessageRelay] 📍 Target Relay Server URL: "${this.serverUrl}"`);
+    console.log(`[MessageRelay] 👤 Local Client Identity Registration ID: "${userId}"`);
 
     this.socket = io(this.serverUrl, {
       query: { userId },
@@ -42,7 +44,9 @@ class MessageRelayService {
     });
 
     this.socket.on('connect', async () => {
-      console.log('MessageRelay: Connected:', this.socket?.id);
+      console.log(`[MessageRelay] ✅ Connection established successfully!`);
+      console.log(`[MessageRelay] 🔑 Active Socket Session ID: "${this.socket?.id}"`);
+      console.log(`[MessageRelay] 🔒 Mounted under E2EE Relay: "${this.serverUrl}"`);
       EventBus.emit('network.connected');
       this.processOfflineQueue();
 

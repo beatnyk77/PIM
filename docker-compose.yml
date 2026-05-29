@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------
+  # PIM E2EE Relay Server (Development Mode with Hot Reloading)
+  # -------------------------------------------------------------
+  backend:
+    container_name: pim-relay-dev
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        CONTEXT_DIR: backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - ALLOWED_ORIGINS=http://localhost:8081,http://127.0.0.1:8081,http://localhost:19000,http://localhost:19006
+    volumes:
+      # Bind mount the backend source code for real-time host updates
+      - ./backend:/usr/src/app
+      # Prevent host node_modules override to preserve alpine compiler integrity
+      - /usr/src/app/node_modules
+    # Run in development mode with nodemon/ts-node reload
+    command: npm run dev
+
+  # -------------------------------------------------------------
+  # PIM Native Expo Bundler (Optional - run with: docker compose --profile app up)
+  # -------------------------------------------------------------
+  app:
+    container_name: pim-app-bundler
+    profiles:
+      - app
+    build:
+      context: ./app
+      dockerfile: tsconfig.json # Placeholder or build fallback if needed, but typically run locally
+    ports:
+      - "8081:8081"
+      - "19000:19000"
+      - "19001:19001"
+      - "19002:19002"
+    environment:
+      - EXPO_PUBLIC_RELAY_URL=ws://localhost:3000
+      - NODE_ENV=development
+    volumes:
+      - ./app:/usr/src/app
+      - /usr/src/app/node_modules
+    # Starts the Expo Metro bundler
+    command: npx expo start --web

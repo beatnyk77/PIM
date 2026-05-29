@@ -44,6 +44,17 @@ For native mobile clients, Socket.IO connections often arrive without a browser 
 
 ## Railway Deployment Steps
 
+### Option A: Railway Builds From Repo Root
+
+This is the most forgiving setup because the repository root now includes a Dockerfile that builds only `/backend`.
+
+1. Keep **Root Directory** empty, `/`, or unset.
+2. Keep **Config File Path** empty, or set it to `/railway.json`.
+3. Confirm Railway uses the root `Dockerfile`.
+4. The deploy logs should show `COPY backend/package*.json` and `pim-backend`.
+
+### Option B: Railway Builds From Backend Root
+
 1. Create a new Railway project from the GitHub repo.
 2. Open the backend service settings.
 3. Set **Root Directory** to `/backend`.
@@ -61,7 +72,9 @@ EXPO_PUBLIC_RELAY_URL=wss://relay.pim-protocol.net
 
 11. Rebuild the app binary with EAS after setting the relay URL.
 
-If Railway is still reading the repository root `package.json`, the root directory setting has not been applied to the service. The deployment logs should reference `pim-backend`, `backend/package.json`, or Docker steps from `backend/Dockerfile`, not the root `pim-monorepo` package.
+If Railway is still reading the repository root `package.json` with the Nixpacks builder, it is not using either Railway config file. Switch the builder to Dockerfile or set the config path to `/railway.json`.
+
+The repo root also includes fallback `build` and `start` scripts that delegate to `/backend`, so a Nixpacks root build can still boot the relay. Dockerfile mode is preferred because it is more explicit and matches production locally.
 
 ## Release Checks
 
