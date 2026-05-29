@@ -11,6 +11,7 @@ export interface ChatMessage {
   type?: 'text' | 'image' | 'audio';
   mediaUri?: string;
   groupId?: string; // Add groupId support
+  recipientId?: string; // Add recipientId support
   expiresAt?: Date; // For self-destruct messages
 }
 

@@ -36,6 +36,10 @@ export default function HomeScreen() {
         });
       }
 
+      // Load keys to identify real user identity
+      const keys = await IdentityService.loadKeys();
+      const myId = keys ? keys.registrationId.toString() : '';
+
       // 2. Iterate through messages to populate last message and derive direct chats
       for (const m of messages) {
         const msgTime = new Date(m.timestamp).getTime();
@@ -53,8 +57,8 @@ export default function HomeScreen() {
           }
         } else {
           // 1:1 message
-          const contactId = m.senderId;
-          if (contactId === 'system' || contactId === 'me' || !contactId) continue;
+          const contactId = m.isMe ? m.recipientId : m.senderId;
+          if (!contactId || contactId === 'system' || contactId === 'me' || contactId === myId) continue;
           
           const existing = conversationMap.get(contactId);
           if (!existing || msgTime > existing.timestamp) {

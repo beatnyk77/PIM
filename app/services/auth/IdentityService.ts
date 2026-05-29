@@ -672,10 +672,15 @@ export class IdentityService {
     try {
       const { getMessages } = require('../storage/LocalDb');
       const messages = await getMessages();
+      const keys = await this.loadKeys();
+      const myId = keys ? keys.registrationId.toString() : '';
       const recipients = new Set<string>();
+      
       messages.forEach((m: any) => {
-        if (m.senderId && m.senderId !== 'me' && m.senderId !== 'user1' && m.senderId !== 'system') {
-          recipients.add(m.senderId);
+        if (m.groupId) return;
+        const contactId = m.isMe ? m.recipientId : m.senderId;
+        if (contactId && contactId !== 'system' && contactId !== myId && contactId !== 'me' && contactId !== 'user1') {
+          recipients.add(contactId);
         }
       });
       return Array.from(recipients);

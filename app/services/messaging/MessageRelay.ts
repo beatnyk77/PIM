@@ -562,9 +562,12 @@ class MessageRelayService {
       this.socket.emit('subscribe-tokens-batch', newTokens);
     }
 
+    const keys = await IdentityService.loadKeys();
+    const myId = keys ? keys.registrationId.toString() : 'me';
+
     const payload = JSON.stringify({
       type: 'token-replenishment',
-      senderId: 'me',
+      senderId: myId,
       tokens: newTokens
     });
     

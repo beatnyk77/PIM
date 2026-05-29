@@ -103,14 +103,14 @@ export default function ChatScreen() {
   };
 
   const handleGenerateAiSearchSummary = async () => {
-    const threadMessages = messages.filter(m => activeGroup ? m.groupId === activeGroup : (!m.groupId && m.senderId === activeChat));
+    const threadMessages = messages.filter(m => activeGroup ? m.groupId === activeGroup : (!m.groupId && ((m.isMe && m.recipientId === activeChat) || (!m.isMe && m.senderId === activeChat))));
     const filteredMessages = threadMessages.filter(m => m.content.toLowerCase().includes(searchQuery.toLowerCase()));
     
     if (filteredMessages.length === 0) return;
     setIsAiSearchLoading(true);
     setAiSearchSummary(null);
     try {
-      const contextText = filteredMessages.slice(0, 10).map(m => `${m.senderId === 'me' ? 'Me' : m.senderId}: ${m.content}`).join('\n');
+      const contextText = filteredMessages.slice(0, 10).map(m => `${m.isMe ? 'Me' : m.senderId}: ${m.content}`).join('\n');
       const prompt = `Here are search results for "${searchQuery}" in our local group chat history:\n${contextText}\nProvide a single-sentence, concise summary explaining what was discussed regarding "${searchQuery}". Keep it under 25 words, strictly based on these messages. Do not extrapolate.`;
       const summary = await AiAdvisor.query(prompt);
       setAiSearchSummary(summary);
@@ -282,10 +282,13 @@ export default function ChatScreen() {
         setRecording(null);
         
         if (uri) {
+            const keys = await IdentityService.loadKeys();
+            const myId = keys ? keys.registrationId.toString() : 'me';
             const newMessage: ChatMessage = {
                  id: Date.now().toString(),
                  content: 'Voice Note',
-                 senderId: activeGroup || activeChat || 'me',
+                 senderId: myId,
+                 recipientId: activeChat || undefined,
                  timestamp: new Date(),
                  isMe: true,
                  status: 'sent',
@@ -316,10 +319,13 @@ export default function ChatScreen() {
 
     if (!result.canceled && result.assets[0].uri) {
          const uri = result.assets[0].uri;
+         const keys = await IdentityService.loadKeys();
+         const myId = keys ? keys.registrationId.toString() : 'me';
          const newMessage: ChatMessage = {
              id: Date.now().toString(),
              content: 'Image',
-             senderId: activeGroup || activeChat || 'me',
+             senderId: myId,
+             recipientId: activeChat || undefined,
              timestamp: new Date(),
              isMe: true,
              status: 'sent',
@@ -347,10 +353,13 @@ export default function ChatScreen() {
         expiresAt = new Date(Date.now() + ttl * 1000);
     }
 
+    const keys = await IdentityService.loadKeys();
+    const myId = keys ? keys.registrationId.toString() : 'me';
     const newMessage: ChatMessage = {
       id: tempId,
       content: content,
-      senderId: activeGroup || activeChat || 'me',
+      senderId: myId,
+      recipientId: activeChat || undefined,
       timestamp: new Date(),
       isMe: true,
       status: 'sent', 
@@ -456,7 +465,7 @@ export default function ChatScreen() {
     setInputText(reply);
   };
 
-  const threadMessages = messages.filter(m => activeGroup ? m.groupId === activeGroup : (!m.groupId && m.senderId === activeChat));
+  const threadMessages = messages.filter(m => activeGroup ? m.groupId === activeGroup : (!m.groupId && ((m.isMe && m.recipientId === activeChat) || (!m.isMe && m.senderId === activeChat))));
   const filteredMessages = threadMessages.filter(m => {
     if (!showSearch || !searchQuery) return true;
     return m.content.toLowerCase().includes(searchQuery.toLowerCase());
