@@ -17,6 +17,8 @@ export default function HomeScreen() {
   const [invitePasswordInput, setInvitePasswordInput] = useState('');
 
   const [conversations, setConversations] = useState<any[]>([]);
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [newChatUserIdInput, setNewChatUserIdInput] = useState('');
 
   useEffect(() => {
     const buildConversations = async () => {
@@ -51,8 +53,8 @@ export default function HomeScreen() {
           }
         } else {
           // 1:1 message
-          const contactId = m.isMe ? 'user2' : m.senderId; // Fallback to 'user2' if sent by me
-          if (contactId === 'system') continue;
+          const contactId = m.senderId;
+          if (contactId === 'system' || contactId === 'me' || !contactId) continue;
           
           const existing = conversationMap.get(contactId);
           if (!existing || msgTime > existing.timestamp) {
@@ -65,17 +67,6 @@ export default function HomeScreen() {
             });
           }
         }
-      }
-
-      // 3. Ensure default user2 is always present if no direct chat was derived
-      if (!conversationMap.has('user2')) {
-        conversationMap.set('user2', {
-          id: 'user2',
-          name: '👤 Chat with user2',
-          type: 'direct',
-          lastMessage: 'No messages yet',
-          timestamp: 0
-        });
       }
 
       // Convert map to array and sort by timestamp descending (newest messages first)
@@ -190,6 +181,14 @@ export default function HomeScreen() {
       navigation.navigate('Chat');
   };
 
+  const handleNewChatSubmit = () => {
+    const targetUserId = newChatUserIdInput.trim();
+    if (!targetUserId) return;
+    setShowNewChatModal(false);
+    setNewChatUserIdInput('');
+    openChat(targetUserId, 'direct');
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-gray-50">
       <View className="px-4 py-4 flex-row justify-between items-center bg-white border-b border-gray-200">
@@ -256,7 +255,7 @@ export default function HomeScreen() {
 
         <TouchableOpacity 
           className="bg-blue-600 px-4 py-3 rounded-full items-center justify-center shadow-lg flex-row"
-          onPress={() => openChat('new-user', 'direct')}
+          onPress={() => setShowNewChatModal(true)}
         >
             <Text className="text-white font-bold mr-1">👤</Text>
             <Text className="text-white font-bold text-sm">New Chat</Text>
@@ -321,6 +320,54 @@ export default function HomeScreen() {
                 className="flex-1 bg-indigo-600 py-3.5 rounded-full items-center active:bg-indigo-700 shadow-md"
               >
                 <Text className="text-white font-bold font-semibold">Join Group</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Start New Chat Modal */}
+      <Modal
+        visible={showNewChatModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setShowNewChatModal(false);
+          setNewChatUserIdInput('');
+        }}
+      >
+        <View className="flex-1 justify-end bg-black/50">
+          <View className="bg-white p-6 rounded-t-3xl shadow-xl">
+            <Text className="text-xl font-bold text-gray-900 mb-2">👤 Start New Chat</Text>
+            <Text className="text-gray-500 text-xs mb-4 leading-relaxed">
+              Enter the target user's Registration ID / User ID to begin a secure direct end-to-end encrypted messaging session.
+            </Text>
+
+            <TextInput
+              className="bg-gray-100 p-3.5 rounded-xl mb-4 font-mono text-xs border border-gray-200"
+              placeholder="E.g. user2"
+              value={newChatUserIdInput}
+              onChangeText={setNewChatUserIdInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                onPress={() => {
+                  setShowNewChatModal(false);
+                  setNewChatUserIdInput('');
+                }}
+                className="flex-1 bg-gray-100 py-3.5 rounded-full items-center"
+              >
+                <Text className="text-gray-700 font-bold">Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleNewChatSubmit}
+                className="flex-1 bg-blue-600 py-3.5 rounded-full items-center active:bg-blue-700 shadow-md"
+              >
+                <Text className="text-white font-bold font-semibold">Start Chat</Text>
               </TouchableOpacity>
             </View>
           </View>

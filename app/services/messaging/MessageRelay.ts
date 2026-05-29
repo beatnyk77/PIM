@@ -45,9 +45,7 @@ class MessageRelayService {
       console.log('MessageRelay: Connected:', this.socket?.id);
       EventBus.emit('network.connected');
       this.processOfflineQueue();
-      
-      // Auto-join test group for MVP
-      this.joinGroup('test-group');
+
 
       // Auto-register public E2EE key bundle
       this.registerKeys();
@@ -91,7 +89,11 @@ class MessageRelayService {
       console.log('MessageRelay: Received anonymous token-routed envelope via token:', data.destinationToken);
       
       try {
-        const senderId = await this.resolveTokenOwner(data.destinationToken) || 'user2';
+        const senderId = await this.resolveTokenOwner(data.destinationToken);
+        if (!senderId) {
+          console.warn(`MessageRelay: Anonymous envelope consumed token ${data.destinationToken} does not map to any active dynamic contact. Dropping.`);
+          return;
+        }
         
         // Remove this consumed token from our inbound local list
         const currentInbound = await this.getInboundTokens(senderId);
@@ -531,10 +533,17 @@ class MessageRelayService {
 
   async subscribeInboundTokens() {
     if (!this.socket?.connected) return;
-    const user2Tokens = await this.getInboundTokens('user2');
-    if (user2Tokens.length > 0) {
-      console.log(`MessageRelay: Subscribing to ${user2Tokens.length} inbound tokens for user2.`);
-      this.socket.emit('subscribe-tokens-batch', user2Tokens);
+    try {
+      const contacts = await IdentityService.getContacts();
+      for (const contact of contacts) {
+        const tokens = await this.getInboundTokens(contact);
+        if (tokens.length > 0) {
+          console.log(`MessageRelay: Subscribing to ${tokens.length} inbound tokens for dynamic contact ${contact}.`);
+          this.socket.emit('subscribe-tokens-batch', tokens);
+        }
+      }
+    } catch (e) {
+      console.error('MessageRelay: Failed to subscribe dynamic inbound tokens', e);
     }
   }
 
@@ -757,8 +766,10 @@ class MessageRelayService {
           encryptedPayload = await GroupSessionManager.encrypt(groupId, content);
         }
       } else {
-        const participants = ['user2'];
         const keys = await IdentityService.loadKeys();
+        const myId = keys?.registrationId.toString() || '1';
+        const roster = await GroupSessionManager.getGroupRoster(groupId);
+        const participants = roster.map((m: any) => m.userId).filter((id: any) => id !== myId);
         const myDeviceId = keys ? keys.deviceId.toString() : '1';
         const mySenderKey = await EncryptionService.getOrGenerateGroupSenderKey(groupId, myDeviceId);
 

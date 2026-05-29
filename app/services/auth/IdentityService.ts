@@ -668,21 +668,19 @@ export class IdentityService {
     }
   }
 
-  private static async getContacts(): Promise<string[]> {
+  static async getContacts(): Promise<string[]> {
     try {
       const { getMessages } = require('../storage/LocalDb');
       const messages = await getMessages();
       const recipients = new Set<string>();
       messages.forEach((m: any) => {
-        if (m.senderId && m.senderId !== 'me' && m.senderId !== 'user1') {
+        if (m.senderId && m.senderId !== 'me' && m.senderId !== 'user1' && m.senderId !== 'system') {
           recipients.add(m.senderId);
         }
       });
-      // Always fallback/include 'user2' just in case database is empty
-      recipients.add('user2');
       return Array.from(recipients);
     } catch {
-      return ['user2'];
+      return [];
     }
   }
 }
