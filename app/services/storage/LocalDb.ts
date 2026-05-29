@@ -33,15 +33,15 @@ import * as SecureStore from 'expo-secure-store';
 //    Our modified `decryptData` function already returns the original text as-is if decryption fails or is bypassed,
 //    guaranteeing seamless backward compatibility during the database transition.
 //
-let DB_ENCRYPTION_KEY = 'super-secret-local-db-key-placeholder';
+let DB_ENCRYPTION_KEY = '';
 
 export function encryptData(text: string): string {
-  if (!text) return text;
+  if (!text || !DB_ENCRYPTION_KEY) return text;
   return CryptoJS.AES.encrypt(text, DB_ENCRYPTION_KEY).toString();
 }
 
 export function decryptData(cipherText: string): string {
-  if (!cipherText) return cipherText;
+  if (!cipherText || !DB_ENCRYPTION_KEY) return cipherText;
   try {
     const bytes = CryptoJS.AES.decrypt(cipherText, DB_ENCRYPTION_KEY);
     const decrypted = bytes.toString(CryptoJS.enc.Utf8);
