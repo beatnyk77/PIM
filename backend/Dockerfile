@@ -27,6 +27,8 @@ WORKDIR /usr/src/app
 
 ENV NODE_ENV=production
 
+RUN apk add --no-cache wget
+
 # Copy dynamic package catalogs for runtime install
 COPY package*.json ./
 
@@ -38,6 +40,9 @@ COPY --from=builder /usr/src/app/dist ./dist
 
 # Expose port (railway / fly bind dynamically to PORT env)
 EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/health" >/dev/null || exit 1
 
 # Execute server
 CMD ["node", "dist/server.js"]

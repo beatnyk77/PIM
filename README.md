@@ -66,7 +66,7 @@ PIM is currently in an active **Controlled Private Beta** development phase unde
 1. **Stateless Relay Amnesia:**
    * **Limitation:** To ensure absolute zero-telemetry and metadata shielding, the default relay server is completely state-free and zero-knowledge. It operates without a persistent database and retains no message queue queues.
    * **Consequence:** If a recipient is completely offline at the exact millisecond a direct or group message is transmitted, the server drops the packet instantly.
-   * **Mitigation:** For critical, high-availability deployments, self-hosting a private relay with a transient PostgreSQL cache is recommended (see [relay_deployment.md](file:///Users/kartikaysharma/.gemini/antigravity-ide/brain/bff7db43-e758-455e-b241-c2f8aed24787/relay_deployment.md)).
+   * **Mitigation:** For critical, high-availability deployments, self-hosting a private relay with a transient PostgreSQL cache is recommended. See [`backend/PRODUCTION_DEPLOYMENT.md`](backend/PRODUCTION_DEPLOYMENT.md) for the first production relay runbook.
 2. **Decoy Partition Cryptographic Isolation:**
    * **Limitation:** The Plausible Deniability Decoy Vault runs an independent SQLite database container (`pim-decoy-db.sqlite`) derived from a separate PBKDF2 passphrase chain.
    * **Consequence:** Real contacts, secure keys, and messaging histories never cross over or synchronize with the decoy partition. This isolation is a strict cryptographic requirement; any data bridge would leave structural traces, instantly defeating plausible deniability under inspection.

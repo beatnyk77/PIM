@@ -110,6 +110,7 @@ io.use((socket, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
+const startedAt = new Date();
 
 // Store connected users: userId -> Set of socketIds (for multi-device)
 const connectedUsers = new Map<string, Set<string>>();
@@ -120,6 +121,25 @@ const keyRegistry = new Map<string, any>();
 // Volatile registries for metadata defense
 const volatileKeyRegistry = new Map<string, any>();
 const tokenRoutingRegistry = new Map<string, string>();
+
+app.get('/', (_req, res) => {
+  res.status(200).json({
+    service: 'pim-e2ee-relay',
+    status: 'ok',
+    websocketPath: '/socket.io/',
+  });
+});
+
+app.get('/health', (_req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    uptimeSeconds: Math.floor(process.uptime()),
+    startedAt: startedAt.toISOString(),
+    connectedUsers: connectedUsers.size,
+    registeredKeyBundles: keyRegistry.size,
+    activeRoutingTokens: tokenRoutingRegistry.size,
+  });
+});
 
 io.on('connection', (socket: Socket) => {
   const userId = socket.handshake.query.userId as string;
