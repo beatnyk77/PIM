@@ -10,11 +10,14 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',') 
   : ['https://app.pim-protocol.org', 'https://pim-client.netlify.app'];
 
+// Ensure '*' is parsed securely if supplied
+const isAllOriginsAllowed = ALLOWED_ORIGINS.includes('*');
+
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps, curl, or local testing)
+    // Allow requests with no origin (like native mobile apps or curl)
     if (!origin) return callback(null, true);
-    if (ALLOWED_ORIGINS.indexOf(origin) !== -1 || ALLOWED_ORIGINS.includes('*')) {
+    if (isAllOriginsAllowed || ALLOWED_ORIGINS.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -23,17 +26,36 @@ app.use(cors({
   credentials: true
 }));
 
-// 2. Production Security Headers Middleware
+// 2. Privacy-First Request Logging Middleware (anonymizes IPs to prevent metadata tracking)
+app.use((req, res, next) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const anonymizedIp = ip.includes('.') 
+    ? ip.split('.').slice(0, 2).join('.') + '.x.x'
+    : 'ipv6-masked';
+  
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`[HTTP] ${new Date().toISOString()} | ${req.method} ${req.originalUrl} | Status ${res.statusCode} | IP ${anonymizedIp} | ${duration}ms`);
+  });
+  next();
+});
+
+// 3. Production Hardened Security Headers Middleware
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Content-Security-Policy', "default-src 'self'");
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'; object-src 'none';");
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-DNS-Prefetch-Control', 'off');
+  res.setHeader('X-Download-Options', 'noopen');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
   next();
 });
 
-// 3. In-Memory HTTP Rate Limiter (IP-based)
+// 4. In-Memory HTTP Rate Limiter (IP-based)
 const ipLimits = new Map<string, { count: number; resetTime: number }>();
 const LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 const MAX_REQUESTS = 100; // max 100 requests per minute
